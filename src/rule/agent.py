@@ -14,7 +14,7 @@ from typing import DefaultDict
 game_state = Game()
 missions = Missions()
 
-
+# 
 def game_logic(game_state: Game, missions: Missions, DEBUG=False):
     if DEBUG: print = __builtin__.print
     else: print = lambda *args: None
