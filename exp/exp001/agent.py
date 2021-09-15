@@ -118,7 +118,6 @@ def agent(observation, configuration, DEBUG=False):
     else:
         # actually rebuilt and recomputed from scratch
         game_state._update(observation["updates"])
-
     str_step = str(observation["step"]).zfill(3)
     with open('snapshots/observation-{}.pkl'.format(str_step), 'wb') as handle:
         pickle.dump(observation, handle, protocol=pickle.HIGHEST_PROTOCOL)
