@@ -455,6 +455,12 @@ class Game:
 
 
     def repopulate_targets(self, missions: Missions):
+        """targetを再居住させる関数
+        与えられたmissionsに含まれているunit_idが条件を満たすとき追加する
+
+        Args:
+            missions (Missions): [description]
+        """
         pos_list = missions.get_targets()
         self.targeted_leaders: Set = set(self.xy_to_resource_group_id.find(tuple(pos)) for pos in pos_list)
         self.targeted_xy_set: Set = set(tuple(pos) for pos in pos_list) - self.player_city_tile_xy_set
@@ -466,13 +472,18 @@ class Game:
 
             unit: Unit = self.player.units_by_id[unit_id]
             current_position = tuple(unit.pos)
+            # 現在の位置からリソースグループIDを見つける
             leader = self.xy_to_resource_group_id.find(current_position)
+            # resource group idが見つかった場合はユニットidを追加する
             if leader:
                 self.resource_leader_to_locating_units[leader].add(unit_id)
 
             mission: Mission = missions[unit_id]
             target_position = tuple(mission.target_position)
+
+            # 目標の位置へのリソースグループidを見つける
             leader = self.xy_to_resource_group_id.find(target_position)
+            # 見つかった場合はユニットiDを追加
             if leader:
                 self.resource_leader_to_targeting_units[leader].add(unit_id)
 
