@@ -16,6 +16,7 @@ missions = Missions()
 
 
 def game_logic(game_state: Game, missions: Missions, DEBUG=False):
+
     if DEBUG: print = __builtin__.print
     else: print = lambda *args: None
 
@@ -23,12 +24,14 @@ def game_logic(game_state: Game, missions: Missions, DEBUG=False):
     missions = make_unit_missions(game_state, missions, DEBUG=DEBUG)
     mission_annotations = print_and_annotate_missions(game_state, missions)
     missions, actions_by_units = make_unit_actions(game_state, missions, DEBUG=DEBUG)
-    movement_annotations = annotate_movements(game_state, actions_by_units)
+    movement_annotations = annotate_movements(game_state, actions_by_units)  # "m "でなければ何もしない
 
     print("actions_by_cities", actions_by_cities)
     print("actions_by_units", actions_by_units)
     print("mission_annotations", mission_annotations)
     print("movement_annotations", movement_annotations)
+    # cityとunitのacctionを足すのはわかるけれどmissing_annotationsやmovementをactionとして渡しているのはなぜ？
+    # debug用?
     actions = actions_by_cities + actions_by_units + mission_annotations + movement_annotations
     return actions, game_state, missions
 
@@ -91,6 +94,7 @@ def annotate_movements(game_state: Game, actions_by_units: List[str]):
     d5 = [(0,-1), (1,0), (0,1), (-1,0), (0,0)]
 
     for action_by_units in actions_by_units:
+        # unit actionがmでなければ空のlistを返す
         if action_by_units[:2] != "m ":
             continue
         unit_id, dir = action_by_units.split(" ")[1:]
@@ -111,6 +115,7 @@ def agent(observation, configuration, DEBUG=False):
     global game_state, missions
 
     if observation["step"] == 0:
+        # game_stateというインスタンスをagent内で保持しておく
         game_state = Game()
         game_state._initialize(observation["updates"])
         game_state.player_id = observation.player

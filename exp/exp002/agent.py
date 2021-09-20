@@ -83,6 +83,7 @@ def agent(observation, configuration):
     if len(cities) > 0:
         city = cities[0]
         created_worker = (units >= units_cap)
+        # city_tileごとに行動を決定
         for city_tile in city.citytiles[::-1]:
             if city_tile.can_act():
                 # ユニット上限よりもプレイヤーのユニットが多い場合はresearchを行う。上限より多くなるとはどういうケース？
@@ -122,7 +123,7 @@ def agent(observation, configuration):
     # we can collide in cities so we will use this tiles as exceptions
     city_tiles = {(tile.pos.x, tile.pos.y) for city in player.cities.values() for tile in city.citytiles}
     
-    
+    # playerが保有するユニットごとに行動を決定していく
     for unit in player.units:
         if unit.can_act():
             closest_resource_tile, closest_resource_dist = find_closest_resources(unit.pos, player, resource_tiles)
