@@ -1,1 +1,5 @@
-/Lux-Design-2021/
+input
+errorlogs
+replays
+exp/*/lux
+exp/*/main.py
