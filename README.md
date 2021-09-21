@@ -12,6 +12,11 @@
 sh load_dataset.sh <TODAY_DATE>
 ```
 
+### Make the new exp folder
+```sh
+sh make_expfolder.sh <NEW_EXP_NAME> <COPY_EXP_NAME>
+```
+
 ### Make submission file
 ```sh
 sh submission.sh <AGENT_PATH> 
