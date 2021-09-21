@@ -283,7 +283,7 @@ def main():
     seed_everything(seed)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
-    episode_dir = '../../input/lux_ai_top_episodes_0920/'
+    episode_dir = '../../input/lux_ai_top_episodes_0921/'
     obses, samples = create_dataset_from_json(episode_dir)
     logger.info('obses:', len(obses), 'samples:', len(samples))
 
@@ -293,7 +293,7 @@ def main():
         logger.info(f'{actions[value]:^5}: {count:>3}')
     
     model = LuxNet()
-    train, val = train_test_split(samples, test_size=0.1, random_state=42, stratify=labels)
+    train, val = train_test_split(samples, test_size=0.1, random_state=seed, stratify=labels)
     batch_size = 64
 
     train_loader = DataLoader(
@@ -312,7 +312,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
-    train_model(model, dataloaders_dict, criterion, optimizer, num_epochs=20)
+    train_model(model, dataloaders_dict, criterion, optimizer, num_epochs=30)
     wandb.finish()
 
 if __name__ =='__main__':
