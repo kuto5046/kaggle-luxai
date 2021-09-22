@@ -284,7 +284,7 @@ def main():
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
     episode_dir = '../../input/lux_ai_top_episodes_0921/'
-    obses, samples = create_dataset_from_json(episode_dir)
+    obses, samples = create_dataset_from_json(episode_dir, team_name="Tigga")
     logger.info('obses:', len(obses), 'samples:', len(samples))
 
     labels = [sample[-1] for sample in samples]
