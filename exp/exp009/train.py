@@ -36,7 +36,6 @@ def get_logger(level=INFO, out_file=None):
 
 logger = get_logger(level=INFO, out_file='results.log')
 
-
 def seed_everything(seed: int = 42):
     random.seed(seed)
     np.random.seed(seed)
@@ -57,13 +56,11 @@ def to_label(action):
         label = None
     return unit_id, label
 
-
 def depleted_resources(obs):
     for u in obs['updates']:
         if u.split(' ')[0] == 'r':
             return False
     return True
-
 
 def create_dataset_from_json(episode_dir, team_name='Toad Brigade'): 
     obses = {}
