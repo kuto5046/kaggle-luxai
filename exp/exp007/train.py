@@ -65,29 +65,46 @@ def depleted_resources(obs):
     return True
 
 
-def create_dataset_from_json(episode_dir, team_name='Toad Brigade'): 
+def create_dataset_from_json(episode_dir, team_name=None): 
     obses = {}
     samples = []
-    append = samples.append
-    
+    non_actions_count = 0
     episodes = [path for path in Path(episode_dir).glob('*.json') if 'output' not in path.name]
     for filepath in tqdm(episodes): 
         with open(filepath) as f:
             json_load = json.load(f)
 
         ep_id = json_load['info']['EpisodeId']
-        index = np.argmax([r or 0 for r in json_load['rewards']])
-        if json_load['info']['TeamNames'][index] != team_name:
-            continue
 
+        # Noneの場合、全てを利用
+        # チーム指定がない場合は勝者のactionのみ学習
+        if team_name == None:
+            index = np.argmax([r or 0 for r in json_load['rewards']])  # 最終結果から勝った方のindexを取得 
+            # index = np.argmax(json_load['rewards'])  
+
+        # 指定したteam_nameが対戦結果のどちらかに該当する場合は利用
+        # team_namを指定している場合はそのチームのactionのみを学習
+        elif team_name in json_load['info']['TeamNames']:
+            index = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex: 0,1
+        # 指定したteam_nameに合致しないものはskip
+        else:
+            continue
+ 
         for i in range(len(json_load['steps'])-1):
             if json_load['steps'][i][index]['status'] == 'ACTIVE':
                 actions = json_load['steps'][i+1][index]['action']
+                
+                # 空のactionsもある actions=[]
+                # その場合skip
+                if actions == None:
+                    non_actions_count += 1
+                    continue
+
                 obs = json_load['steps'][i][0]['observation']
                 
                 if depleted_resources(obs):
                     break
-                
+                    
                 obs['player'] = index
                 obs = dict([
                     (k,v) for k,v in obs.items() 
@@ -95,12 +112,13 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade'):
                 ])
                 obs_id = f'{ep_id}_{i}'
                 obses[obs_id] = obs
-                                
+            
                 for action in actions:
                     unit_id, label = to_label(action)
                     if label is not None:
-                        append((obs_id, unit_id, label))
+                        samples.append((obs_id, unit_id, label))
 
+    logger.info(f"空のactionsの数: {non_actions_count}")
     return obses, samples
 
 
@@ -283,8 +301,8 @@ def main():
     seed_everything(seed)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
-    episode_dir = '../../input/lux_ai_top_episodes_0921/'
-    obses, samples = create_dataset_from_json(episode_dir)
+    episode_dir = '../../input/lux_ai_tigga_episodes_0922/'
+    obses, samples = create_dataset_from_json(episode_dir, team_name=None)
     logger.info('obses:', len(obses), 'samples:', len(samples))
 
     labels = [sample[-1] for sample in samples]
