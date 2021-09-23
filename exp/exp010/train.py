@@ -63,23 +63,29 @@ def depleted_resources(obs):
     return True
 
 def create_dataset_from_json(episode_dir, team_name='Toad Brigade'): 
+    logger.info(f"Team: {team_name}")
     obses = {}
     samples = []
-    append = samples.append
-    
+    non_actions_count = 0
     episodes = [path for path in Path(episode_dir).glob('*.json') if 'output' not in path.name]
     for filepath in tqdm(episodes): 
         with open(filepath) as f:
             json_load = json.load(f)
 
         ep_id = json_load['info']['EpisodeId']
-        index = np.argmax([r or 0 for r in json_load['rewards']])
-        if json_load['info']['TeamNames'][index] != team_name:
+        if team_name not in json_load['info']['TeamNames']: 
             continue
-
+        
+        index = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex: 0,1
         for i in range(len(json_load['steps'])-1):
             if json_load['steps'][i][index]['status'] == 'ACTIVE':
-                actions = json_load['steps'][i+1][index]['action']
+                actions = json_load['steps'][i+1][index]['action']                
+                
+                # 空のactionsもある actions=[]
+                # その場合skip
+                if actions == None:
+                    non_actions_count += 1
+                    continue
                 obs = json_load['steps'][i][0]['observation']
                 
                 if depleted_resources(obs):
@@ -96,8 +102,8 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade'):
                 for action in actions:
                     unit_id, label = to_label(action)
                     if label is not None:
-                        append((obs_id, unit_id, label))
-
+                        samples.append((obs_id, unit_id, label))
+    logger.info(f"空のactionsの数: {non_actions_count}")
     return obses, samples
 
 
@@ -281,8 +287,8 @@ def main():
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
     episode_dir = '../../input/lux_ai_top_episodes_0921/'
-    obses, samples = create_dataset_from_json(episode_dir, team_name="Tigga")
-    logger.info('obses:', len(obses), 'samples:', len(samples))
+    obses, samples = create_dataset_from_json(episode_dir)
+    logger.info(f'obses:{len(obses)} samples:{len(samples)}')
 
     labels = [sample[-1] for sample in samples]
     actions = ['north', 'south', 'west', 'east', 'bcity']
