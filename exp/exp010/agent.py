@@ -132,9 +132,11 @@ def agent(observation, configuration):
     for city in player.cities.values():
         for city_tile in city.citytiles:
             if city_tile.can_act():
+                # 保有unit数(worker)よりもcity tileの数が多いならworkerを追加
                 if unit_count < player.city_tile_count: 
                     actions.append(city_tile.build_worker())
                     unit_count += 1
+                # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
                 elif not player.researched_uranium():
                     actions.append(city_tile.research())
                     player.research_points += 1

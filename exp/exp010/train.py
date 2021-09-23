@@ -45,12 +45,30 @@ def seed_everything(seed: int = 42):
     torch.backends.cudnn.deterministic = True  # type: ignore
     torch.backends.cudnn.benchmark = False  # type: ignore
 
-def to_label(action):
+def to_label(action: list):
+    """action記号をラベルに変換する関数
+    扱っているのはunit系のactionのみでcity系のactionはNone扱い？
+    unit系のactionにはtransferやpillageも含まれるがそれらのラベルはNone扱い？
+
+    Args:
+        action (list): [description]
+
+    Returns:
+        [type]: [description]
+    
+    ex)
+    input: action=['m u_1 w']
+    strs = ['m', 'u_1', 'w']
+    strs[0] - action
+    strs[1] - unit_id
+    strs[2] - direction(if action is 'm')
+    """
     strs = action.split(' ')
     unit_id = strs[1]
-    if strs[0] == 'm':
-        label = {'c': None, 'n': 0, 's': 1, 'w': 2, 'e': 3}[strs[2]]
-    elif strs[0] == 'bcity':
+    if strs[0] == 'm':  # 移動行動の場合
+        label_dict = {'c': None, 'n': 0, 's': 1, 'w': 2, 'e': 3}
+        label = label_dict[strs[2]]
+    elif strs[0] == 'bcity':  # city build actionの場合
         label = 4
     else:
         label = None
@@ -79,7 +97,8 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade'):
         index = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex: 0,1
         for i in range(len(json_load['steps'])-1):
             if json_load['steps'][i][index]['status'] == 'ACTIVE':
-                actions = json_load['steps'][i+1][index]['action']                
+                # 現在のstep=iのobsを見て選択されたactionが正解データになるのでi+1のactionを取得する
+                actions = json_load['steps'][i+1][index]['action']               
                 
                 # 空のactionsもある actions=[]
                 # その場合skip
@@ -91,15 +110,19 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade'):
                 if depleted_resources(obs):
                     break
                 
-                obs['player'] = index
+                obs['player'] = index  # 新しくplayerという情報を追加
+                # 必要な情報のみ取得
                 obs = dict([
                     (k,v) for k,v in obs.items() 
                     if k in ['step', 'updates', 'player', 'width', 'height']
                 ])
+
+                # episode_idとstep数からobs_idを振る
                 obs_id = f'{ep_id}_{i}'
                 obses[obs_id] = obs
                                 
                 for action in actions:
+                    # moveとbuild cityのaction labelのみが取得される?
                     unit_id, label = to_label(action)
                     if label is not None:
                         samples.append((obs_id, unit_id, label))
@@ -109,17 +132,45 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade'):
 
 # Input for Neural Network
 def make_input(obs, unit_id):
+    """obs情報をnnが学習しやすい形式に変換する関数
+    全て0~1に正規化されている
+    1 ch: cargo-unitの位置  
+    2 ch: cargo-unitが持つresourceの合計量(/100で正規化？)(3つまとめて良い？)  
+    3 ch: 自チームのworker-unitの位置 
+    4 ch: cooldownの状態(/6で正規化)
+    5 ch: resourceの合計量(/100で正規化？)(3つまとめて良い？)
+    6 ch: 敵チームのworker-unitの位置 
+    7 ch: cooldownの状態(/6で正規化)
+    8 ch: resourceの合計量(/100で正規化？)(3つまとめて良い？)
+    9 ch: 自チームのcitytileの位置
+    10ch: cities[city_id]
+    11ch: 敵チームのcitytileの位置
+    12ch: cities[city_id]
+    13ch: wood量
+    14ch: coal量
+    15ch: uranium量
+    16ch: 自チームのresearch point(位置情報はなし)(正規化)
+    17ch: 敵チームのresearch point(位置情報はなし)(正規化)
+    18ch: 何cycle目かを表す(正規化)
+    19ch: 何step目かを表す(正規化)
+    20ch: map
+    """
     width, height = obs['width'], obs['height']
-    x_shift = (32 - width) // 2
+
+    # mapのサイズを調整するためにshiftするマス数
+    # width=20の場合は6 width=21の場合5
+    x_shift = (32 - width) // 2  
     y_shift = (32 - height) // 2
     cities = {}
     
+    # (c, w, h)
+    # mapの最大サイズが(32,32)なのでそれに合わせている
     b = np.zeros((20, 32, 32), dtype=np.float32)
     
     for update in obs['updates']:
         strs = update.split(' ')
         input_identifier = strs[0]
-        
+
         if input_identifier == 'u':
             x = int(strs[4]) + x_shift
             y = int(strs[5]) + y_shift
@@ -176,7 +227,7 @@ def make_input(obs, unit_id):
     b[17, :] = obs['step'] % 40 / 40
     # Turns
     b[18, :] = obs['step'] / 360
-    # Map Size
+    # Map Size(使用しているマスのみ1で埋める)
     b[19, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
 
     return b
@@ -218,20 +269,29 @@ class BasicConv2d(nn.Module):
 class LuxNet(nn.Module):
     def __init__(self):
         super().__init__()
-        layers, filters = 12, 32
-        self.conv0 = BasicConv2d(20, filters, (3, 3), False)
-        # self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), False)] * layers)
-        self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
-        self.head_p = nn.Linear(filters, 5, bias=False)
+        layers = 12
+        filters = 32
+        self.input_layer = nn.Sequential(
+            BasicConv2d(20, filters, (3, 3), False),
+            nn.ReLU()
+        )
 
+        # self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), False)] * layers)
+        # TODO 12層でチャネル数が変わらないけどこれでいいのか？
+        self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), bn=True) for _ in range(layers)])
+        
+        self.output_layer = nn.Sequential(
+            nn.Linear(filters, 5, bias=False),  # direction4つとbuild cityの計5つの行動
+
+        )
     def forward(self, x):
-        h = F.relu_(self.conv0(x))
+        h = self.input_layer(x)
         for block in self.blocks:
             h = F.relu_(h + block(h))
-            
+        
         h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)
-        p = self.head_p(h_head)
-        return p
+        y = self.output_layer(h_head)
+        return y
 
 def train_model(model, dataloaders_dict, criterion, optimizer, num_epochs):
     best_acc = 0.0
@@ -285,7 +345,7 @@ def main():
     seed = 42
     seed_everything(seed)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
-    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
+    # wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
     episode_dir = '../../input/lux_ai_top_episodes_0921/'
     obses, samples = create_dataset_from_json(episode_dir)
     logger.info(f'obses:{len(obses)} samples:{len(samples)}')
