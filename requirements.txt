@@ -23,6 +23,7 @@ resnest==0.0.5
 efficientnet-pytorch==0.6.3
 
 # ML
+kaggle-environments==1.8.12
 kaggle==1.5.6
 optuna==2.6.0
 wandb==0.10.22
