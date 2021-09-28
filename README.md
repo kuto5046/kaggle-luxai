@@ -29,3 +29,17 @@ kaggle competitions submit -c lux-ai-2021 -f submission.py -m "Message"
 
 ### Replay the game
 ./notebook/replay.ipynbを参照
+
+### CLIで対戦
+指定したagent同士で対戦
+```
+sudo lux-ai-2021 --python=python3 <main.py of path> <main.py of path>
+```
+
+replayデータとして出力されるjsonファイルを以下のサイトにアップロードする
+https://2021vis.lux-ai.org/
+
+LBのagentと対戦
+```
+sudo lux-ai-2021 --python=python3 --rankSystem="trueskill" --tournament <path/to/agent1> <path/to/agent2>...
+```
