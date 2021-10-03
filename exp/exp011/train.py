@@ -2,8 +2,10 @@ import numpy as np
 import json
 from pathlib import Path
 import os
+from numpy.core.fromnumeric import squeeze
 import wandb
 import random
+from scipy.stats import rankdata
 import logging
 from logging import INFO, DEBUG
 from tqdm import tqdm
@@ -84,6 +86,7 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade'):
     logger.info(f"Team: {team_name}")
     obses = {}
     samples = []
+    rewards = [-1, 1]
     non_actions_count = 0
     episodes = [path for path in Path(episode_dir).glob('*.json') if 'output' not in path.name]
     for filepath in tqdm(episodes): 
@@ -95,6 +98,9 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade'):
             continue
         
         index = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex: 0,1
+        rewards_list = np.array(json_load['rewards'])
+        rewards_list[np.where(rewards_list==None)] = 0
+        rank = rankdata(rewards_list, 'dense')[index] - 1
         for i in range(len(json_load['steps'])-1):
             if json_load['steps'][i][index]['status'] == 'ACTIVE':
                 # 現在のstep=iのobsを見て選択されたactionが正解データになるのでi+1のactionを取得する
@@ -125,7 +131,7 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade'):
                     # moveとbuild cityのaction labelのみが取得される?
                     unit_id, label = to_label(action)
                     if label is not None:
-                        samples.append((obs_id, unit_id, label))
+                        samples.append((obs_id, unit_id, label, rewards[rank]))
     logger.info(f"空のactionsの数: {non_actions_count}")
     return obses, samples
 
@@ -136,21 +142,28 @@ def make_input(obs, unit_id):
     全て0~1に正規化されている
     1 ch: cargo-unitの位置  
     2 ch: cargo-unitが持つresourceの合計量(/100で正規化？)(3つまとめて良い？)  
+
     3 ch: 自チームのworker-unitの位置 
     4 ch: cooldownの状態(/6で正規化)
     5 ch: resourceの合計量(/100で正規化？)(3つまとめて良い？)
+    
     6 ch: 敵チームのworker-unitの位置 
     7 ch: cooldownの状態(/6で正規化)
     8 ch: resourceの合計量(/100で正規化？)(3つまとめて良い？)
+    
     9 ch: 自チームのcitytileの位置
     10ch: cities[city_id]
+    
     11ch: 敵チームのcitytileの位置
     12ch: cities[city_id]
+    
     13ch: wood量
     14ch: coal量
     15ch: uranium量
+    
     16ch: 自チームのresearch point(位置情報はなし)(正規化)
     17ch: 敵チームのresearch point(位置情報はなし)(正規化)
+    
     18ch: 何cycle目かを表す(正規化)
     19ch: 何step目かを表す(正規化)
     20ch: map
@@ -242,11 +255,10 @@ class LuxDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        obs_id, unit_id, action = self.samples[idx]
+        obs_id, unit_id, action, reward = self.samples[idx]
         obs = self.obses[obs_id]
         state = make_input(obs, unit_id)
-        
-        return state, action
+        return state, action, reward 
 
 
 # Neural Network for Lux AI
@@ -280,20 +292,22 @@ class LuxNet(nn.Module):
         # TODO 12層でチャネル数が変わらないけどこれでいいのか？
         self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), bn=True) for _ in range(layers)])
         
-        self.output_layer = nn.Sequential(
-            nn.Linear(filters, 5, bias=False),  # direction4つとbuild cityの計5つの行動
+        self.head_p = nn.Linear(filters, 5, bias=False)  # for policy(action)
+        self.head_v = nn.Linear(filters*2, 1, bias=False)  # for value(reward)
 
-        )
     def forward(self, x):
         h = self.input_layer(x)
         for block in self.blocks:
             h = F.relu_(h + block(h))
-        
-        h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)
-        y = self.output_layer(h_head)
-        return y
+        # h = (batch, c, w, h) -> (batch, c) 
+        # h:(64,32,32,32)
+        h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # h_head: (64, 32)
+        h_avg = h.view(h.size(0), h.size(1), -1).mean(-1)  # h_avg: (64, 32)
+        p = self.head_p(h_head)  # policy
+        v = torch.tanh(self.head_v(torch.cat([h_head, h_avg], dim=1)))  # value
+        return p, v.squeeze(dim=1)
 
-def train_model(model, dataloaders_dict, criterion, optimizer, num_epochs):
+def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, num_epochs):
     best_acc = 0.0
 
     for epoch in range(num_epochs):
@@ -305,39 +319,45 @@ def train_model(model, dataloaders_dict, criterion, optimizer, num_epochs):
             else:
                 model.eval()
                 
-            epoch_loss = 0.0
+            epoch_ploss = 0.0
+            epoch_vloss = 0.0
             epoch_acc = 0
             
             dataloader = dataloaders_dict[phase]
             for item in tqdm(dataloader, leave=False):
                 states = item[0].cuda().float()
                 actions = item[1].cuda().long()
+                rewards = item[2].cuda().float()
 
                 optimizer.zero_grad()
                 
                 with torch.set_grad_enabled(phase == 'train'):
-                    policy = model(states)
-                    loss = criterion(policy, actions)
+                    policy, value = model(states)
+                    policy_loss = p_criterion(policy, actions)
+                    value_loss = v_criterion(value, rewards)
+                    loss = policy_loss + value_loss
                     _, preds = torch.max(policy, 1)
 
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
 
-                    epoch_loss += loss.item() * len(policy)
+                    epoch_ploss += policy_loss.item() * len(policy)
+                    epoch_vloss += value_loss.item() * len(policy)
                     epoch_acc += torch.sum(preds == actions.data)
 
             data_size = len(dataloader.dataset)
-            epoch_loss = epoch_loss / data_size
+            epoch_ploss = epoch_ploss / data_size
+            epoch_vloss = epoch_vloss / data_size
             epoch_acc = epoch_acc.double() / data_size
         
             if phase=='val':
-                wandb.log({'Loss/val': epoch_loss, 'ACC/val': epoch_acc})
-                logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss: {epoch_loss:.4f} | Acc: {epoch_acc:.4f}')
+                wandb.log({'Loss/policy': epoch_ploss, 'Loss/value':epoch_vloss, 'ACC/val': epoch_acc})
+                logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Loss(value): {epoch_vloss:.4f} | Acc: {epoch_acc:.4f}')
         
         if epoch_acc > best_acc:
             traced = torch.jit.trace(model.cpu(), torch.rand(1, 20, 32, 32))
-            traced.save('model.pth')
+            traced.save(f'best.pth')
             best_acc = epoch_acc
 
      
@@ -345,8 +365,8 @@ def main():
     seed = 42
     seed_everything(seed)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
-    # wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
-    episode_dir = '../../input/lux_ai_top_episodes_0921/'
+    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
+    episode_dir = '../../input/lux_ai_toad_episodes_1003/'
     obses, samples = create_dataset_from_json(episode_dir)
     logger.info(f'obses:{len(obses)} samples:{len(samples)}')
 
@@ -357,7 +377,7 @@ def main():
     
     model = LuxNet()
     train, val = train_test_split(samples, test_size=0.1, random_state=seed, stratify=labels)
-    batch_size = 64
+    batch_size = 1024
 
     train_loader = DataLoader(
         LuxDataset(obses, train), 
@@ -372,10 +392,11 @@ def main():
         num_workers=2
     )
     dataloaders_dict = {"train": train_loader, "val": val_loader}
-    criterion = nn.CrossEntropyLoss()
+    p_criterion = nn.CrossEntropyLoss()
+    v_criterion = nn.MSELoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
-    train_model(model, dataloaders_dict, criterion, optimizer, num_epochs=30)
+    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, num_epochs=30)
     wandb.finish()
 
 if __name__ =='__main__':

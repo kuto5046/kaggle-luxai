@@ -1,0 +1,36 @@
+2021-10-03 17:02:24,954 - INFO - logger set up
+2021-10-03 17:02:25,897 - INFO - Team: Toad Brigade
+2021-10-03 17:02:32,984 - INFO - 空のactionsの数: 1
+2021-10-03 17:02:32,985 - INFO - obses:155123 samples:710696
+2021-10-03 17:02:33,055 - INFO - bcity: 260119
+2021-10-03 17:02:33,055 - INFO - south: 450577
+2021-10-03 17:05:25,970 - INFO - Epoch 1/30 |  val  | Loss(policy): 0.8575 | Loss(value): 0.4228 | Acc: 0.6608
+2021-10-03 17:08:18,183 - INFO - Epoch 2/30 |  val  | Loss(policy): 0.7262 | Loss(value): 0.1138 | Acc: 0.7069
+2021-10-03 17:11:10,559 - INFO - Epoch 3/30 |  val  | Loss(policy): 0.6756 | Loss(value): 0.0282 | Acc: 0.7268
+2021-10-03 17:14:03,186 - INFO - Epoch 4/30 |  val  | Loss(policy): 0.6751 | Loss(value): 0.4285 | Acc: 0.7305
+2021-10-03 17:16:55,644 - INFO - Epoch 5/30 |  val  | Loss(policy): 0.6316 | Loss(value): 0.2785 | Acc: 0.7460
+2021-10-03 17:19:48,046 - INFO - Epoch 6/30 |  val  | Loss(policy): 0.6325 | Loss(value): 0.0233 | Acc: 0.7478
+2021-10-03 17:22:40,519 - INFO - Epoch 7/30 |  val  | Loss(policy): 0.6176 | Loss(value): 0.0226 | Acc: 0.7527
+2021-10-03 17:25:33,198 - INFO - Epoch 8/30 |  val  | Loss(policy): 0.6891 | Loss(value): 0.0301 | Acc: 0.7347
+2021-10-03 17:28:25,769 - INFO - Epoch 9/30 |  val  | Loss(policy): 0.6033 | Loss(value): 0.2163 | Acc: 0.7590
+2021-10-03 17:31:18,838 - INFO - Epoch 10/30 |  val  | Loss(policy): 0.6343 | Loss(value): 0.0198 | Acc: 0.7518
+2021-10-03 17:34:11,863 - INFO - Epoch 11/30 |  val  | Loss(policy): 0.5898 | Loss(value): 0.3625 | Acc: 0.7616
+2021-10-03 17:37:04,700 - INFO - Epoch 12/30 |  val  | Loss(policy): 0.5675 | Loss(value): 0.0231 | Acc: 0.7743
+2021-10-03 17:39:57,650 - INFO - Epoch 13/30 |  val  | Loss(policy): 0.6009 | Loss(value): 0.3476 | Acc: 0.7583
+2021-10-03 17:42:50,458 - INFO - Epoch 14/30 |  val  | Loss(policy): 0.5677 | Loss(value): 0.0171 | Acc: 0.7737
+2021-10-03 17:45:43,203 - INFO - Epoch 15/30 |  val  | Loss(policy): 0.5719 | Loss(value): 0.0731 | Acc: 0.7699
+2021-10-03 17:48:36,017 - INFO - Epoch 16/30 |  val  | Loss(policy): 0.5815 | Loss(value): 0.0291 | Acc: 0.7711
+2021-10-03 17:51:28,754 - INFO - Epoch 17/30 |  val  | Loss(policy): 0.5791 | Loss(value): 0.1007 | Acc: 0.7739
+2021-10-03 17:54:21,359 - INFO - Epoch 18/30 |  val  | Loss(policy): 0.5670 | Loss(value): 0.0889 | Acc: 0.7762
+2021-10-03 17:57:14,244 - INFO - Epoch 19/30 |  val  | Loss(policy): 0.5888 | Loss(value): 0.0088 | Acc: 0.7667
+2021-10-03 18:00:06,957 - INFO - Epoch 20/30 |  val  | Loss(policy): 0.5696 | Loss(value): 0.6382 | Acc: 0.7752
+2021-10-03 18:02:59,750 - INFO - Epoch 21/30 |  val  | Loss(policy): 0.5648 | Loss(value): 0.0084 | Acc: 0.7765
+2021-10-03 18:05:52,414 - INFO - Epoch 22/30 |  val  | Loss(policy): 0.5626 | Loss(value): 0.0198 | Acc: 0.7790
+2021-10-03 18:08:45,004 - INFO - Epoch 23/30 |  val  | Loss(policy): 0.5604 | Loss(value): 0.0401 | Acc: 0.7787
+2021-10-03 18:11:37,384 - INFO - Epoch 24/30 |  val  | Loss(policy): 0.5792 | Loss(value): 0.0047 | Acc: 0.7747
+2021-10-03 18:14:29,662 - INFO - Epoch 25/30 |  val  | Loss(policy): 0.5567 | Loss(value): 0.0301 | Acc: 0.7807
+2021-10-03 18:17:22,172 - INFO - Epoch 26/30 |  val  | Loss(policy): 0.6100 | Loss(value): 0.0798 | Acc: 0.7606
+2021-10-03 18:20:14,816 - INFO - Epoch 27/30 |  val  | Loss(policy): 0.5664 | Loss(value): 0.0598 | Acc: 0.7773
+2021-10-03 18:23:07,494 - INFO - Epoch 28/30 |  val  | Loss(policy): 0.5557 | Loss(value): 0.0039 | Acc: 0.7831
+2021-10-03 18:26:00,035 - INFO - Epoch 29/30 |  val  | Loss(policy): 0.5633 | Loss(value): 0.1444 | Acc: 0.7817
+2021-10-03 18:28:52,747 - INFO - Epoch 30/30 |  val  | Loss(policy): 0.5718 | Loss(value): 0.2493 | Acc: 0.7777
