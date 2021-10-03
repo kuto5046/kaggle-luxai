@@ -5,3 +5,4 @@ exp/*/lux
 exp/*/main.py
 exp/*/wandb
 handyrl
+tmp/
