@@ -147,9 +147,10 @@ def agent(observation, configuration):
         if unit.can_act() and (game_state.turn % 40 < 30 or not in_city(unit.pos)):
             state = make_input(observation, unit.id)
             with torch.no_grad():
-                p = model(torch.from_numpy(state).unsqueeze(0))
+                p, v = model(torch.from_numpy(state).unsqueeze(0))
 
-            policy = p.squeeze(0).numpy()
+            policy = p.squeeze(0).detach().numpy()  # unitの方策(行動)
+            value = v.item()  # 状態価値
 
             action, pos = get_action(policy, unit, dest)
             actions.append(action)
