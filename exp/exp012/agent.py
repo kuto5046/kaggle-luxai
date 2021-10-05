@@ -2,6 +2,7 @@ import os
 import numpy as np
 import torch
 from lux.game import Game
+from lux.game_map import Position
 
 
 path = '/kaggle_simulations/agent' if os.path.exists('/kaggle_simulations') else '.'
@@ -109,13 +110,59 @@ def call_func(obj, method, args=[]):
     return getattr(obj, method)(*args)
 
 
-unit_actions = [('move', 'n'), ('move', 's'), ('move', 'w'), ('move', 'e'), ('build_city',)]
-def get_action(policy, unit, dest):
+def get_adjacent_units_and_unit_resource(unit, obs, own_team):
+    adjacent_units = []
+    unit_resource = {}
+    for update in obs['updates']:
+        strs = update.split(' ')
+        input_identifier = strs[0]
+        # unitのobsに注目
+        if input_identifier == 'u':
+            if int(strs[2])==own_team: 
+                unit_id = strs[3]
+                pos = Position(int(strs[4]), int(strs[5]))
+                # 対象unitに隣接するunit_idを記録
+                if unit.pos.is_adjacent(pos):
+                    adjacent_units.append(unit_id)
+                # 対象unitの保有するresource_typeとamountを取得
+                if unit.id == unit_id:
+                    unit_resource['wood'] = int(strs[6])
+                    unit_resource['coal'] = int(strs[7])
+                    unit_resource['uranium'] = int(strs[8])
+                
+    return adjacent_units, unit_resource
+
+
+unit_actions = [('move', 'n'), ('move', 's'), ('move', 'w'), ('move', 'e'), ('build_city',), ('pillage',), ('transfer', )]
+def get_action(policy, unit, dest, obs, own_team):
+
+    # 行動確率の高い順に考える
     for label in np.argsort(policy)[::-1]:
         act = unit_actions[label]
-        pos = unit.pos.translate(act[-1], 1) or unit.pos
+        pos = unit.pos.translate(act[-1], 1) or unit.pos  # moveの場合移動pos/それ以外の場合現在のpos
+
+        # 既に決定している他のunitと移動先が被っていないorcity内であれば
         if pos not in dest or in_city(pos):
-            return call_func(unit, *act), pos 
+            
+            if act[0] == 'transfer':
+                adjacent_units, unit_resource = get_adjacent_units_and_unit_resource(unit, obs, own_team)
+                # resourceを保有していないor隣接するunitがいない場合はtransferはしない
+                if (sum(list(unit_resource.values())) == 0)or(len(adjacent_units)==0):
+                    continue
+                #adjacent_units: transfer先の候補となる隣接unit
+                # 優先順位としてはwood -> coal -> uranium
+                # 1つでも保有していればそれをtransfer用のresourceとする
+                for resource_type, amount in unit_resource.items():
+                    if amount > 0:
+                        break
+                assert amount > 0
+
+                transfer_unit = adjacent_units[0]  # とりあえず仮でこうしておく
+                # actというtupleにdest_id, resource_type, amountを追加
+                # act = ('transfer', transfer_unit, resource_type, amount)d
+                return unit.transfer(transfer_unit, resource_type, amount), pos
+            
+            return call_func(unit, *act), pos         
             
     return unit.move('c'), unit.pos
 
@@ -152,7 +199,7 @@ def agent(observation, configuration):
             policy = p.squeeze(0).detach().numpy()  # unitの方策(行動)
             value = v.item()  # 状態価値
 
-            action, pos = get_action(policy, unit, dest)
+            action, pos = get_action(policy, unit, dest, observation, player.team)
             actions.append(action)
             dest.append(pos)
 
