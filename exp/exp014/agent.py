@@ -133,7 +133,8 @@ def get_adjacent_units_and_unit_resource(unit, obs, own_team):
     return adjacent_units, unit_resource
 
 
-unit_actions = [('move', 'n'), ('move', 's'), ('move', 'w'), ('move', 'e'), ('build_city',), ('pillage',), ('transfer', )]
+# unit_actions = [('move', 'n'), ('move', 's'), ('move', 'w'), ('move', 'e'), ('build_city',), ('pillage',), ('transfer', )]
+unit_actions = [('move', 'n'), ('move', 's'), ('move', 'w'), ('move', 'e'), ('build_city',)]
 def get_action(policy, unit, dest, obs, own_team):
 
     # 行動確率の高い順に考える

@@ -1,0 +1,19 @@
+2021-10-05 20:43:15,789 - INFO - logger set up
+2021-10-05 20:43:16,784 - INFO - Team: Toad Brigade
+2021-10-05 20:43:25,737 - INFO - 空のactionsの数: 0
+2021-10-05 20:43:25,738 - INFO - obses:96072 samples:486870
+2021-10-05 20:43:25,787 - INFO - north: 85533
+2021-10-05 20:43:25,787 - INFO - south: 171457
+2021-10-05 20:43:25,787 - INFO - west : 111774
+2021-10-05 20:43:25,787 - INFO - east : 81275
+2021-10-05 20:43:25,788 - INFO - bcity: 36831
+2021-10-05 20:45:25,826 - INFO - Epoch 1/10 |  val  | Loss(policy): 0.7476 | Loss(value): 3.6668 | Acc: 0.7004
+2021-10-05 20:47:25,598 - INFO - Epoch 2/10 |  val  | Loss(policy): 0.7163 | Loss(value): 3.7700 | Acc: 0.7183
+2021-10-05 20:49:25,433 - INFO - Epoch 3/10 |  val  | Loss(policy): 0.7295 | Loss(value): 3.3876 | Acc: 0.7076
+2021-10-05 20:51:25,263 - INFO - Epoch 4/10 |  val  | Loss(policy): 0.6292 | Loss(value): 3.4506 | Acc: 0.7458
+2021-10-05 20:53:25,355 - INFO - Epoch 5/10 |  val  | Loss(policy): 0.6088 | Loss(value): 3.2913 | Acc: 0.7556
+2021-10-05 20:55:25,297 - INFO - Epoch 6/10 |  val  | Loss(policy): 0.5968 | Loss(value): 3.3494 | Acc: 0.7623
+2021-10-05 20:57:25,088 - INFO - Epoch 7/10 |  val  | Loss(policy): 0.5924 | Loss(value): 3.2132 | Acc: 0.7638
+2021-10-05 20:59:25,108 - INFO - Epoch 8/10 |  val  | Loss(policy): 0.6385 | Loss(value): 3.4171 | Acc: 0.7523
+2021-10-05 21:01:24,934 - INFO - Epoch 9/10 |  val  | Loss(policy): 0.5673 | Loss(value): 3.1759 | Acc: 0.7734
+2021-10-05 21:03:24,911 - INFO - Epoch 10/10 |  val  | Loss(policy): 0.6168 | Loss(value): 2.9728 | Acc: 0.7574
