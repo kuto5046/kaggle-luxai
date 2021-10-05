@@ -72,10 +72,10 @@ def to_label(action: list):
         label = label_dict[strs[2]]
     elif strs[0] == 'bcity':  # city build actionの場合
         label = 4
-    # elif strs[0] == 'p':  # pillage
-    #     label = 5
-    # elif strs[0] == 't':
-    #     label = 6
+    elif strs[0] == 'p':  # pillage
+        label = 5
+    elif strs[0] == 't':
+        label = 6
     else:
         label = None
     return unit_id, label
@@ -403,8 +403,8 @@ def main():
     logger.info(f'obses:{len(obses)} samples:{len(samples)}')
 
     labels = [sample[2] for sample in samples]
-    # actions = ['north', 'south', 'west', 'east', 'bcity', 'pillage', 'transfer']
-    actions = ['north', 'south', 'west', 'east', 'bcity']
+    actions = ['north', 'south', 'west', 'east', 'bcity', 'pillage', 'transfer']
+    # actions = ['north', 'south', 'west', 'east', 'bcity']
     for value, count in zip(*np.unique(labels, return_counts=True)):
         logger.info(f'{actions[value]:^5}: {count:>3}')
     
