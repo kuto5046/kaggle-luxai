@@ -274,7 +274,7 @@ def train_model(model, dataloaders_dict, criterion, optimizer, num_epochs):
         
         if epoch_acc > best_acc:
             traced = torch.jit.trace(model.cpu(), torch.rand(1, 20, 32, 32))
-            traced.save('model.pth')
+            traced.save('best.pth')
             best_acc = epoch_acc
 
      
@@ -312,7 +312,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
-    train_model(model, dataloaders_dict, criterion, optimizer, num_epochs=30)
+    train_model(model, dataloaders_dict, criterion, optimizer, num_epochs=10)
     wandb.finish()
 
 if __name__ =='__main__':
