@@ -169,7 +169,6 @@ def get_action(policy, unit, dest, obs, own_team):
 
 def agent(observation, configuration):
     global game_state
-    
     game_state = get_game_state(observation)    
     player = game_state.players[observation.player]
     actions = []

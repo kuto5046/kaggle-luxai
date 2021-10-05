@@ -86,7 +86,7 @@ def depleted_resources(obs):
             return False
     return True
 
-def create_dataset_from_json(episode_dir, team_name='Toad Brigade'): 
+def create_dataset_from_json(episode_dir, team_name='Toad Brigade', only_win=True): 
     logger.info(f"Team: {team_name}")
     obses = {}
     samples = []
@@ -98,10 +98,17 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade'):
             json_load = json.load(f)
 
         ep_id = json_load['info']['EpisodeId']
-        if team_name not in json_load['info']['TeamNames']: 
-            continue
+
+        if only_win:  # 指定したチームが勝ったepisodeのみ取得
+            index = np.argmax([r or 0 for r in json_load['rewards']])  # 勝利チームのindex
+            if json_load['info']['TeamNames'][index] != team_name:
+                continue
         
-        index = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex: 0,1
+        else:  # 指定したチームの勝敗関わらずepisodeを取得
+            if team_name not in json_load['info']['TeamNames']: 
+                continue
+            index = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex
+
         rewards_list = np.array(json_load['rewards'])
         rewards_list[np.where(rewards_list==None)] = 0
         rank = rankdata(rewards_list, 'dense')[index] - 1  # win=1/lose=0
