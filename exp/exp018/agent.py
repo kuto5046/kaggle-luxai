@@ -10,18 +10,58 @@ model = torch.jit.load(f'{path}/best.pth')
 model.eval()
 
 
-def make_input(obs, unit_id):
+# Input for Neural Network
+def make_input(obs, unit_id, n_obs_channel):
+    """obs情報をnnが学習しやすい形式に変換する関数
+    全て0~1に正規化されている
+    1 ch: 全部のunitの位置  
+    2 ch: 全部のunitが持つresourceの合計量(/100で正規化？)(3つまとめて良い？)  
+
+    3 ch: 自チームのworker-unitの位置 
+    4 ch: cooldownの状態(/6で正規化)
+    5 ch: resourceの合計量(/100で正規化？)(3つまとめて良い？)
+    
+    6 ch: 敵チームのworker-unitの位置 
+    7 ch: cooldownの状態(/6で正規化) (workerはmax=2/cargoはmax=3という認識)
+    8 ch: resourceの合計量(/100で正規化？)(3つまとめて良い？)
+    
+    9 ch: 自チームのcitytileの位置
+    10ch: 自チームのcitytileの夜間生存期間
+    11ch: cooldown(/10)
+    
+    12ch: 敵チームのcitytileの位置
+    13ch: 敵チームのcitytileの夜間生存期間
+    14ch: cooldown(/10)
+
+    15ch: wood量
+    16ch: coal量
+    17ch: uranium量
+    
+    18ch: 自チームのresearch point(位置情報はなし)
+    19ch: 敵チームのresearch point(位置情報はなし)
+    
+    20ch: road level
+
+    21ch: 何cycle目かを表す
+    22ch: 何step目かを表す
+    23ch: map
+    """
     width, height = obs['width'], obs['height']
+
+    # mapのサイズを調整するためにshiftするマス数
+    # width=20の場合は6 width=21の場合5
     x_shift = (32 - width) // 2
     y_shift = (32 - height) // 2
     cities = {}
     
-    b = np.zeros((20, 32, 32), dtype=np.float32)
+    # (c, w, h)
+    # mapの最大サイズが(32,32)なのでそれに合わせている
+    b = np.zeros((n_obs_channel, 32, 32), dtype=np.float32)
     
     for update in obs['updates']:
         strs = update.split(' ')
         input_identifier = strs[0]
-        
+
         if input_identifier == 'u':
             x = int(strs[4]) + x_shift
             y = int(strs[5]) + y_shift
@@ -50,10 +90,12 @@ def make_input(obs, unit_id):
             city_id = strs[2]
             x = int(strs[3]) + x_shift
             y = int(strs[4]) + y_shift
+            cooldown = int(strs[5])
             idx = 8 + (team - obs['player']) % 2 * 2
-            b[idx:idx + 2, x, y] = (
+            b[idx:idx + 3, x, y] = (
                 1,
-                cities[city_id]
+                cities[city_id],
+                cooldown / 10
             )
         elif input_identifier == 'r':
             # Resources
@@ -61,25 +103,30 @@ def make_input(obs, unit_id):
             x = int(strs[2]) + x_shift
             y = int(strs[3]) + y_shift
             amt = int(float(strs[4]))
-            b[{'wood': 12, 'coal': 13, 'uranium': 14}[r_type], x, y] = amt / 800
+            b[{'wood': 14, 'coal': 15, 'uranium': 16}[r_type], x, y] = amt / 800
         elif input_identifier == 'rp':
             # Research Points
             team = int(strs[1])
             rp = int(strs[2])
-            b[15 + (team - obs['player']) % 2, :] = min(rp, 200) / 200
+            b[17 + (team - obs['player']) % 2, :] = min(rp, 200) / 200
         elif input_identifier == 'c':
             # Cities
             city_id = strs[2]
             fuel = float(strs[3])
             lightupkeep = float(strs[4])
             cities[city_id] = min(fuel / lightupkeep, 10) / 10
+        elif input_identifier == "ccd":
+            x = int(strs[1]) + x_shift
+            y = int(strs[2]) + y_shift
+            road_level = float(strs[3])
+            b[19, x, y] =  road_level / 6
     
     # Day/Night Cycle
-    b[17, :] = obs['step'] % 40 / 40
+    b[20, :] = obs['step'] % 40 / 40
     # Turns
-    b[18, :] = obs['step'] / 360
+    b[21, :] = obs['step'] / 360
     # Map Size
-    b[19, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
+    b[22, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
 
     return b
 
@@ -192,7 +239,7 @@ def agent(observation, configuration):
     dest = []
     for unit in player.units:
         if unit.can_act() and (game_state.turn % 40 < 30 or not in_city(unit.pos)):
-            state = make_input(observation, unit.id)
+            state = make_input(observation, unit.id, n_obs_channel=23)
             with torch.no_grad():
                 p, v = model(torch.from_numpy(state).unsqueeze(0))
 

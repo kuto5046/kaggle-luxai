@@ -162,36 +162,40 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade', only_win=Fal
 
 
 # Input for Neural Network
-def make_input(obs, unit_id):
+def make_input(obs, unit_id, n_obs_channel):
     """obs情報をnnが学習しやすい形式に変換する関数
     全て0~1に正規化されている
-    1 ch: cargo-unitの位置  
-    2 ch: cargo-unitが持つresourceの合計量(/100で正規化？)(3つまとめて良い？)  
+    1 ch: 全部のunitの位置  
+    2 ch: 全部のunitが持つresourceの合計量(/100で正規化？)(3つまとめて良い？)  
 
     3 ch: 自チームのworker-unitの位置 
     4 ch: cooldownの状態(/6で正規化)
     5 ch: resourceの合計量(/100で正規化？)(3つまとめて良い？)
     
     6 ch: 敵チームのworker-unitの位置 
-    7 ch: cooldownの状態(/6で正規化)
+    7 ch: cooldownの状態(/6で正規化) (workerはmax=2/cargoはmax=3という認識)
     8 ch: resourceの合計量(/100で正規化？)(3つまとめて良い？)
     
     9 ch: 自チームのcitytileの位置
-    10ch: cities[city_id]
+    10ch: 自チームのcitytileの夜間生存期間
+    11ch: cooldown(/10)
     
-    11ch: 敵チームのcitytileの位置
-    12ch: cities[city_id]
+    12ch: 敵チームのcitytileの位置
+    13ch: 敵チームのcitytileの夜間生存期間
+    14ch: cooldown(/10)
+
+    15ch: wood量
+    16ch: coal量
+    17ch: uranium量
     
-    13ch: wood量
-    14ch: coal量
-    15ch: uranium量
+    18ch: 自チームのresearch point(位置情報はなし)
+    19ch: 敵チームのresearch point(位置情報はなし)
     
-    16ch: 自チームのresearch point(位置情報はなし)(正規化)
-    17ch: 敵チームのresearch point(位置情報はなし)(正規化)
-    
-    18ch: 何cycle目かを表す(正規化)
-    19ch: 何step目かを表す(正規化)
-    20ch: map
+    20ch: road level
+
+    21ch: 何cycle目かを表す
+    22ch: 何step目かを表す
+    23ch: map
     """
     width, height = obs['width'], obs['height']
 
@@ -203,7 +207,7 @@ def make_input(obs, unit_id):
     
     # (c, w, h)
     # mapの最大サイズが(32,32)なのでそれに合わせている
-    b = np.zeros((20, 32, 32), dtype=np.float32)
+    b = np.zeros((n_obs_channel, 32, 32), dtype=np.float32)
     
     for update in obs['updates']:
         strs = update.split(' ')
@@ -237,10 +241,12 @@ def make_input(obs, unit_id):
             city_id = strs[2]
             x = int(strs[3]) + x_shift
             y = int(strs[4]) + y_shift
+            cooldown = int(strs[5])
             idx = 8 + (team - obs['player']) % 2 * 2
-            b[idx:idx + 2, x, y] = (
+            b[idx:idx + 3, x, y] = (
                 1,
-                cities[city_id]
+                cities[city_id],
+                cooldown / 10
             )
         elif input_identifier == 'r':
             # Resources
@@ -248,33 +254,39 @@ def make_input(obs, unit_id):
             x = int(strs[2]) + x_shift
             y = int(strs[3]) + y_shift
             amt = int(float(strs[4]))
-            b[{'wood': 12, 'coal': 13, 'uranium': 14}[r_type], x, y] = amt / 800
+            b[{'wood': 14, 'coal': 15, 'uranium': 16}[r_type], x, y] = amt / 800
         elif input_identifier == 'rp':
             # Research Points
             team = int(strs[1])
             rp = int(strs[2])
-            b[15 + (team - obs['player']) % 2, :] = min(rp, 200) / 200
+            b[17 + (team - obs['player']) % 2, :] = min(rp, 200) / 200
         elif input_identifier == 'c':
             # Cities
             city_id = strs[2]
             fuel = float(strs[3])
             lightupkeep = float(strs[4])
             cities[city_id] = min(fuel / lightupkeep, 10) / 10
+        elif input_identifier == "ccd":
+            x = int(strs[1]) + x_shift
+            y = int(strs[2]) + y_shift
+            road_level = float(strs[3])
+            b[19, x, y] =  road_level / 6
     
     # Day/Night Cycle
-    b[17, :] = obs['step'] % 40 / 40
+    b[20, :] = obs['step'] % 40 / 40
     # Turns
-    b[18, :] = obs['step'] / 360
+    b[21, :] = obs['step'] / 360
     # Map Size
-    b[19, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
+    b[22, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
 
     return b
 
 
 class LuxDataset(Dataset):
-    def __init__(self, obses, samples):
+    def __init__(self, obses, samples, n_obs_channel):
         self.obses = obses
         self.samples = samples
+        self.n_obs_channel = n_obs_channel
         
     def __len__(self):
         return len(self.samples)
@@ -282,7 +294,7 @@ class LuxDataset(Dataset):
     def __getitem__(self, idx):
         obs_id, unit_id, action, reward = self.samples[idx]
         obs = self.obses[obs_id]
-        state = make_input(obs, unit_id)
+        state = make_input(obs, unit_id, self.n_obs_channel)
         
         return state, action, reward
 
@@ -305,10 +317,10 @@ class BasicConv2d(nn.Module):
 
 
 class LuxNet(nn.Module):
-    def __init__(self, num_actions):
+    def __init__(self, num_actions, n_obs_channel):
         super().__init__()
         layers, filters = 12, 32
-        self.conv0 = BasicConv2d(20, filters, (3, 3), False)
+        self.conv0 = BasicConv2d(n_obs_channel, filters, (3, 3), False)
         self.num_actions = num_actions
         # self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), False)] * layers)
         # TODO 12層でチャネル数が変わらないけどこれでいいのか？
@@ -329,7 +341,7 @@ class LuxNet(nn.Module):
         v = torch.tanh(self.head_v(torch.cat([h_head, h_avg], dim=1)))  # value
         return p, v.squeeze(dim=1)
 
-def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, num_epochs):
+def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, num_epochs=2):
     best_acc = 0.0
 
     for epoch in range(num_epochs):
@@ -378,7 +390,7 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, nu
                 logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Loss(value): {epoch_vloss:.4f} | Acc: {epoch_acc:.4f}')
         
         if epoch_acc > best_acc:
-            traced = torch.jit.trace(model.cpu(), torch.rand(1, 20, 32, 32))
+            traced = torch.jit.trace(model.cpu(), torch.rand(1, n_obs_channel, 32, 32))
             traced.save('best.pth')
             best_acc = epoch_acc
 
@@ -398,18 +410,19 @@ def main():
     for value, count in zip(*np.unique(labels, return_counts=True)):
         logger.info(f'{actions[value]:^5}: {count:>3}')
     
-    model = LuxNet(num_actions=len(actions))
+    n_obs_channel = 23
+    model = LuxNet(len(actions), n_obs_channel)
     train, val = train_test_split(samples, test_size=0.1, random_state=seed, stratify=labels)
     batch_size = 64
 
     train_loader = DataLoader(
-        LuxDataset(obses, train), 
+        LuxDataset(obses, train, n_obs_channel), 
         batch_size=batch_size, 
         shuffle=True, 
         num_workers=2
     )
     val_loader = DataLoader(
-        LuxDataset(obses, val), 
+        LuxDataset(obses, val, n_obs_channel), 
         batch_size=batch_size, 
         shuffle=False, 
         num_workers=2
@@ -419,7 +432,7 @@ def main():
     v_criterion = nn.MSELoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
-    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, num_epochs=10)
+    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, num_epochs=10)
     wandb.finish()
 
 if __name__ =='__main__':
