@@ -376,8 +376,9 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
                         loss.backward()
                         optimizer.step()
 
-                    epoch_ploss += policy_loss.item() * len(policy)
-                    epoch_vloss += value_loss.item()
+                    batch_size = len(policy)
+                    epoch_ploss += policy_loss.item() * batch_size
+                    epoch_vloss += value_loss.item() * batch_size
                     epoch_acc += torch.sum(preds == actions.data)
 
             data_size = len(dataloader.dataset)
@@ -401,7 +402,7 @@ def main():
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
     episode_dir = '../../input/lux_ai_top_episodes_0921/'
-    obses, samples = create_dataset_from_json(episode_dir)
+    obses, samples = create_dataset_from_json(episode_dir, only_win=False)
     logger.info('obses:', len(obses), 'samples:', len(samples))
 
     labels = [sample[2] for sample in samples]
