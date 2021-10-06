@@ -170,7 +170,6 @@ def get_action(policy, unit, dest, obs, own_team):
 
 def agent(observation, configuration):
     global game_state
-    
     game_state = get_game_state(observation)    
     player = game_state.players[observation.player]
     actions = []
@@ -195,9 +194,10 @@ def agent(observation, configuration):
         if unit.can_act() and (game_state.turn % 40 < 30 or not in_city(unit.pos)):
             state = make_input(observation, unit.id)
             with torch.no_grad():
-                p = model(torch.from_numpy(state).unsqueeze(0))
+                p, v = model(torch.from_numpy(state).unsqueeze(0))
 
             policy = p.squeeze(0).numpy()
+            value = v.item()
 
             action, pos = get_action(policy, unit, dest, observation, player.team)
             actions.append(action)

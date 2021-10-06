@@ -1,0 +1,50 @@
+2021-10-06 09:34:19,265 - INFO - logger set up
+2021-10-06 09:34:20,269 - INFO - Team: Toad Brigade
+2021-10-06 09:38:03,209 - INFO - logger set up
+2021-10-06 09:38:04,158 - INFO - Team: Toad Brigade
+2021-10-06 09:38:13,700 - INFO - 空のactionsの数: 0
+2021-10-06 09:38:13,774 - INFO - north: 85533
+2021-10-06 09:38:13,775 - INFO - south: 171457
+2021-10-06 09:38:13,775 - INFO - west : 111774
+2021-10-06 09:38:13,775 - INFO - east : 81275
+2021-10-06 09:38:13,775 - INFO - bcity: 36831
+2021-10-06 09:38:13,775 - INFO - pillage:   5
+2021-10-06 09:38:13,775 - INFO - transfer: 233240
+2021-10-06 09:40:35,954 - INFO - logger set up
+2021-10-06 09:40:36,949 - INFO - Team: Toad Brigade
+2021-10-06 10:01:25,778 - INFO - logger set up
+2021-10-06 10:01:26,776 - INFO - Team: Toad Brigade
+2021-10-06 10:01:46,160 - INFO - logger set up
+2021-10-06 10:01:47,101 - INFO - Team: Toad Brigade
+2021-10-06 10:01:56,618 - INFO - 空のactionsの数: 0
+2021-10-06 10:01:56,696 - INFO - north: 85533
+2021-10-06 10:01:56,696 - INFO - south: 171457
+2021-10-06 10:01:56,696 - INFO - west : 111774
+2021-10-06 10:01:56,697 - INFO - east : 81275
+2021-10-06 10:01:56,697 - INFO - bcity: 36831
+2021-10-06 10:01:56,697 - INFO - pillage:   5
+2021-10-06 10:01:56,697 - INFO - transfer: 233240
+2021-10-06 10:05:24,075 - INFO - Epoch 1/10 |  val  | Loss(policy): 0.7389 | Loss(value): 0.0001 | Acc: 0.7138
+2021-10-06 10:08:50,585 - INFO - Epoch 2/10 |  val  | Loss(policy): 0.6731 | Loss(value): 0.0001 | Acc: 0.7392
+2021-10-06 10:20:16,785 - INFO - logger set up
+2021-10-06 10:20:17,782 - INFO - Team: Toad Brigade
+2021-10-06 10:20:51,195 - INFO - logger set up
+2021-10-06 10:20:52,134 - INFO - Team: Toad Brigade
+2021-10-06 10:21:03,051 - INFO - 空のactionsの数: 1
+2021-10-06 10:21:03,157 - INFO - north: 133632
+2021-10-06 10:21:03,158 - INFO - south: 234419
+2021-10-06 10:21:03,158 - INFO - west : 169748
+2021-10-06 10:21:03,158 - INFO - east : 124145
+2021-10-06 10:21:03,158 - INFO - bcity: 55362
+2021-10-06 10:21:03,158 - INFO - pillage:  20
+2021-10-06 10:21:03,158 - INFO - transfer: 330911
+2021-10-06 10:26:01,956 - INFO - Epoch 1/10 |  val  | Loss(policy): 0.7591 | Loss(value): 0.0014 | Acc: 0.7101
+2021-10-06 10:30:59,622 - INFO - Epoch 2/10 |  val  | Loss(policy): 0.6964 | Loss(value): 0.0003 | Acc: 0.7318
+2021-10-06 10:35:57,439 - INFO - Epoch 3/10 |  val  | Loss(policy): 0.6864 | Loss(value): 0.0002 | Acc: 0.7351
+2021-10-06 10:40:55,717 - INFO - Epoch 4/10 |  val  | Loss(policy): 0.6581 | Loss(value): 0.0033 | Acc: 0.7451
+2021-10-06 10:45:53,799 - INFO - Epoch 5/10 |  val  | Loss(policy): 0.6493 | Loss(value): 0.0004 | Acc: 0.7498
+2021-10-06 10:50:51,357 - INFO - Epoch 6/10 |  val  | Loss(policy): 0.6354 | Loss(value): 0.0003 | Acc: 0.7540
+2021-10-06 10:55:49,506 - INFO - Epoch 7/10 |  val  | Loss(policy): 0.6312 | Loss(value): 0.0001 | Acc: 0.7591
+2021-10-06 11:00:46,884 - INFO - Epoch 8/10 |  val  | Loss(policy): 0.6149 | Loss(value): 0.0001 | Acc: 0.7622
+2021-10-06 11:05:44,175 - INFO - Epoch 9/10 |  val  | Loss(policy): 0.6168 | Loss(value): 0.0001 | Acc: 0.7606
+2021-10-06 11:10:41,942 - INFO - Epoch 10/10 |  val  | Loss(policy): 0.6206 | Loss(value): 0.0001 | Acc: 0.7623

@@ -37,7 +37,6 @@ def get_logger(level=INFO, out_file=None):
 
 logger = get_logger(level=INFO, out_file='results.log')
 
-
 def seed_everything(seed: int = 42):
     random.seed(seed)
     np.random.seed(seed)
@@ -68,7 +67,8 @@ def to_label(action):
     strs = action.split(' ')
     unit_id = strs[1]
     if strs[0] == 'm':
-        label = {'c': None, 'n': 0, 's': 1, 'w': 2, 'e': 3}[strs[2]]
+        label_dict = {'c': None, 'n': 0, 's': 1, 'w': 2, 'e': 3}
+        label = label_dict[strs[2]]
     elif strs[0] == 'bcity':
         label = 4
     elif strs[0] == 'p':  # pillage
@@ -85,26 +85,55 @@ def depleted_resources(obs):
             return False
     return True
 
+def get_reward(json_load, index):
+    """
+    WIN: 1
+    TIE: 0
+    LOSE: -1
+    """
+    rewards_list = np.array(json_load['rewards'])
+    rewards_list[np.where(rewards_list==None)] = 0
 
-def create_dataset_from_json(episode_dir, team_name='Toad Brigade'): 
+    enemy_index = 1 - index
+    if rewards_list[index] > rewards_list[enemy_index]:
+        reward = 1
+    elif rewards_list[index] == rewards_list[enemy_index]:
+        reward = 0
+    elif rewards_list[index] < rewards_list[enemy_index]:
+        reward = -1
+    else:
+        NotImplementedError
+    return reward
+
+def create_dataset_from_json(episode_dir, team_name='Toad Brigade', only_win=False): 
     logger.info(f"Team: {team_name}")
     obses = {}
     samples = []
     non_actions_count = 0
-    
     episodes = [path for path in Path(episode_dir).glob('*.json') if 'output' not in path.name]
     for filepath in tqdm(episodes): 
         with open(filepath) as f:
             json_load = json.load(f)
 
         ep_id = json_load['info']['EpisodeId']
-        index = np.argmax([r or 0 for r in json_load['rewards']])
-        if json_load['info']['TeamNames'][index] != team_name:
-            continue
+        win_index = np.argmax([r or 0 for r in json_load['rewards']])  # win or tie
+        if only_win:  # 指定したチームが勝ったepisodeのみ取得
+            if json_load['info']['TeamNames'][win_index] != team_name:
+                continue
+            own_index = win_index
+        else:  # 指定したチームの勝敗関わらずepisodeを取得
+            if team_name not in json_load['info']['TeamNames']: 
+                continue
+            own_index = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex
 
+        reward = get_reward(json_load, own_index)
         for i in range(len(json_load['steps'])-1):
-            if json_load['steps'][i][index]['status'] == 'ACTIVE':
-                actions = json_load['steps'][i+1][index]['action']
+            if json_load['steps'][i][own_index]['status'] == 'ACTIVE':
+                # 現在のstep=iのobsを見て選択されたactionが正解データになるのでi+1のactionを取得する
+                actions = json_load['steps'][i+1][own_index]['action']
+
+                # 空のactionsもある actions=[]
+                # その場合skip
                 if actions == None:
                     non_actions_count += 1
                     continue
@@ -113,18 +142,21 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade'):
                 if depleted_resources(obs):
                     break
                 
-                obs['player'] = index
+                obs['player'] = own_index
                 obs = dict([
                     (k,v) for k,v in obs.items() 
                     if k in ['step', 'updates', 'player', 'width', 'height']
                 ])
+
+                # episode_idとstep数からobs_idを振る
                 obs_id = f'{ep_id}_{i}'
                 obses[obs_id] = obs
                                 
                 for action in actions:
+                    # moveとbuild cityのaction labelのみが取得される?
                     unit_id, label = to_label(action)
                     if label is not None:
-                        samples.append((obs_id, unit_id, label))
+                        samples.append((obs_id, unit_id, label, reward))
     logger.info(f"空のactionsの数: {non_actions_count}")
     return obses, samples
 
@@ -248,11 +280,11 @@ class LuxDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        obs_id, unit_id, action = self.samples[idx]
+        obs_id, unit_id, action, reward = self.samples[idx]
         obs = self.obses[obs_id]
         state = make_input(obs, unit_id)
         
-        return state, action
+        return state, action, reward
 
 
 # Neural Network for Lux AI
@@ -279,8 +311,11 @@ class LuxNet(nn.Module):
         self.conv0 = BasicConv2d(20, filters, (3, 3), False)
         self.num_actions = num_actions
         # self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), False)] * layers)
+        # TODO 12層でチャネル数が変わらないけどこれでいいのか？
         self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
+
         self.head_p = nn.Linear(filters, self.num_actions, bias=False)
+        self.head_v = nn.Linear(filters*2, 1, bias=False)  # for value(reward)
 
     def forward(self, x):
         h = F.relu_(self.conv0(x))
@@ -288,11 +323,13 @@ class LuxNet(nn.Module):
             h = F.relu_(h + block(h))
         # h = (batch, c, w, h) -> (batch, c) 
         # h:(64,32,32,32)
-        h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)
-        p = self.head_p(h_head)
-        return p
+        h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # h=head: (64, 32)
+        h_avg = h.view(h.size(0), h.size(1), -1).mean(-1)  # h_avg: (64, 32)
+        p = self.head_p(h_head)  # policy
+        v = torch.tanh(self.head_v(torch.cat([h_head, h_avg], dim=1)))  # value
+        return p, v.squeeze(dim=1)
 
-def train_model(model, dataloaders_dict, criterion, optimizer, num_epochs):
+def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, num_epochs):
     best_acc = 0.0
 
     for epoch in range(num_epochs):
@@ -304,35 +341,41 @@ def train_model(model, dataloaders_dict, criterion, optimizer, num_epochs):
             else:
                 model.eval()
                 
-            epoch_loss = 0.0
+            epoch_ploss = 0.0
+            epoch_vloss = 0.0
             epoch_acc = 0
             
             dataloader = dataloaders_dict[phase]
             for item in tqdm(dataloader, leave=False):
                 states = item[0].cuda().float()
                 actions = item[1].cuda().long()
+                rewards = item[2].cuda().float()
 
                 optimizer.zero_grad()
                 
                 with torch.set_grad_enabled(phase == 'train'):
-                    policy = model(states)
-                    loss = criterion(policy, actions)
+                    policy, value = model(states)
+                    policy_loss = p_criterion(policy, actions)
+                    value_loss = v_criterion(value, rewards)
+                    loss = policy_loss + value_loss
                     _, preds = torch.max(policy, 1)
 
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
 
-                    epoch_loss += loss.item() * len(policy)
+                    epoch_ploss += policy_loss.item() * len(policy)
+                    epoch_vloss += value_loss.item()
                     epoch_acc += torch.sum(preds == actions.data)
 
             data_size = len(dataloader.dataset)
-            epoch_loss = epoch_loss / data_size
+            epoch_ploss = epoch_ploss / data_size
+            epoch_vloss = epoch_vloss / data_size
             epoch_acc = epoch_acc.double() / data_size
         
             if phase=='val':
-                wandb.log({'Loss/val': epoch_loss, 'ACC/val': epoch_acc})
-                logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss: {epoch_loss:.4f} | Acc: {epoch_acc:.4f}')
+                wandb.log({'Loss/policy': epoch_ploss, 'Loss/value':epoch_vloss, 'ACC/val': epoch_acc})
+                logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Loss(value): {epoch_vloss:.4f} | Acc: {epoch_acc:.4f}')
         
         if epoch_acc > best_acc:
             traced = torch.jit.trace(model.cpu(), torch.rand(1, 20, 32, 32))
@@ -372,10 +415,11 @@ def main():
         num_workers=2
     )
     dataloaders_dict = {"train": train_loader, "val": val_loader}
-    criterion = nn.CrossEntropyLoss()
+    p_criterion = nn.CrossEntropyLoss()
+    v_criterion = nn.MSELoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
-    train_model(model, dataloaders_dict, criterion, optimizer, num_epochs=10)
+    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, num_epochs=10)
     wandb.finish()
 
 if __name__ =='__main__':
