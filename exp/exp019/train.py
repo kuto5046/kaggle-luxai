@@ -6,6 +6,7 @@ from numpy.core.overrides import array_function_from_dispatcher
 import wandb
 import random
 import logging
+import pandas as pd 
 from logging import INFO, DEBUG
 from tqdm import tqdm
 import torch
@@ -111,9 +112,23 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade', only_win=Fal
     samples = []
     non_actions_count = 0
     episodes = [path for path in Path(episode_dir).glob('*.json') if 'output' not in path.name]
+
+    submission_id_list = []
+    latest_lb_list = []
     for filepath in tqdm(episodes): 
         with open(filepath) as f:
             json_load = json.load(f)
+            submission_id_list.append(json_load['other']['SubmissionId'])            
+            latest_lb_list.append(json_load['other']['LatestLB'])            
+    sub_df = pd.DataFrame([submission_id_list, latest_lb_list], index=['SubmissionId', 'LatestLB']).T
+    target_sub_id = sub_df["SubmissionId"].value_counts().index[0]
+
+    for filepath in tqdm(episodes): 
+        with open(filepath) as f:
+            json_load = json.load(f)
+
+        if json_load['other']['SubmissionId'] != target_sub_id:
+            continue
 
         ep_id = json_load['info']['EpisodeId']
         win_index = np.argmax([r or 0 for r in json_load['rewards']])  # win or tie
@@ -401,9 +416,9 @@ def main():
     seed_everything(seed)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
-    episode_dir = '../../input/lux_ai_top_episodes_0921/'
-    obses, samples = create_dataset_from_json(episode_dir, only_win=False)
-    logger.info('obses:', len(obses), 'samples:', len(samples))
+    episode_dir = '../../input/lux_ai_toad_episodes_1007/'
+    obses, samples = create_dataset_from_json(episode_dir, only_win=True)
+    logger.info(f'obses:{len(obses)} samples:{len(samples)}')
 
     labels = [sample[2] for sample in samples]
     # actions = ['north', 'south', 'west', 'east', 'bcity']
