@@ -7,3 +7,5 @@ exp/*/wandb
 handyrl
 tmp
 notebook/
+LuxPythonEnvGym
+exp/*/luxai2021
