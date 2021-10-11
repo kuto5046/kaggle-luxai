@@ -194,14 +194,16 @@ def get_city_action(policy, city_tile, unit_count, player):
     for label in np.argsort(policy)[::-1]:
 
         act = city_actions[label]
-        if (act=="build_worker")&(unit_count < player.city_tile_count): 
+        # if (act=="build_worker")&(unit_count < player.city_tile_count): 
+        if unit_count < player.city_tile_count: 
             unit_count += 1
             return city_tile.build_worker(), unit_count
-        elif (act=="research")&(not player.researched_uranium()):
+        # elif (act=="research")&(not player.researched_uranium()):
+        elif not player.researched_uranium():
             player.research_points += 1
             return city_tile.research(), unit_count
-        else:
-            return None, unit_count
+
+    return None, unit_count
 
 unit_actions = [('move', 'n'), ('move', 's'), ('move', 'w'), ('move', 'e'), ('build_city',), ('pillage',), ('transfer', )]
 def get_unit_action(policy, unit, dest, obs, own_team):
