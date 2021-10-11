@@ -6,16 +6,19 @@ from lux.game_map import Position
 
 
 path = '/kaggle_simulations/agent' if os.path.exists('/kaggle_simulations') else '.'
-model = torch.jit.load(f'{path}/best.pth')
-model.eval()
+unit_model = torch.jit.load(f'{path}/unit_best.pth')
+unit_model.eval()
+city_model = torch.jit.load(f'{path}/city_best.pth')
+city_model.eval()
 
 
 # Input for Neural Network
-def make_input(obs, unit_id, n_obs_channel):
+# Input for Neural Network
+def make_input(obs, target_id, n_obs_channel, target):
     """obs情報をnnが学習しやすい形式に変換する関数
     全て0~1に正規化されている
-    1 ch: 全部のunitの位置  
-    2 ch: 全部のunitが持つresourceの合計量(/100で正規化？)(3つまとめて良い？)  
+    1 ch: actionの対象のunit(city)の位置  
+    2 ch: actionの対象のunitが持つresourceの合計量(/100で正規化？)(3つまとめて良い？)  
 
     3 ch: 自チームのworker-unitの位置 
     4 ch: cooldownの状態(/6で正規化)
@@ -57,7 +60,11 @@ def make_input(obs, unit_id, n_obs_channel):
     # (c, w, h)
     # mapの最大サイズが(32,32)なのでそれに合わせている
     b = np.zeros((n_obs_channel, 32, 32), dtype=np.float32)
-    
+
+    if target == "city":
+        # x:target_id[0], y:target_id[1]
+        b[1, target_id[0], target_id[1]] = 1  # 0chは何も情報がない
+
     for update in obs['updates']:
         strs = update.split(' ')
         input_identifier = strs[0]
@@ -68,7 +75,8 @@ def make_input(obs, unit_id, n_obs_channel):
             wood = int(strs[7])
             coal = int(strs[8])
             uranium = int(strs[9])
-            if unit_id == strs[3]:
+
+            if target_id == strs[3]:
                 # Position and Cargo
                 b[:2, x, y] = (
                     1,
@@ -180,9 +188,23 @@ def get_adjacent_units_and_unit_resource(unit, obs, own_team):
     return adjacent_units, unit_resource
 
 
-# unit_actions = [('move', 'n'), ('move', 's'), ('move', 'w'), ('move', 'e'), ('build_city',)]
+city_actions = [('research',), ('build_worker', )]
+def get_city_action(policy, city_tile, unit_count, player):
+    # 行動確率の高い順に考える
+    for label in np.argsort(policy)[::-1]:
+
+        act = city_actions[label]
+        if (act=="build_worker")&(unit_count < player.city_tile_count): 
+            unit_count += 1
+            return city_tile.build_worker(), unit_count
+        elif (act=="research")&(not player.researched_uranium()):
+            player.research_points += 1
+            return city_tile.research(), unit_count
+        else:
+            return None, unit_count
+
 unit_actions = [('move', 'n'), ('move', 's'), ('move', 'w'), ('move', 'e'), ('build_city',), ('pillage',), ('transfer', )]
-def get_action(policy, unit, dest, obs, own_team):
+def get_unit_action(policy, unit, dest, obs, own_team):
 
     # 行動確率の高い順に考える
     for label in np.argsort(policy)[::-1]:
@@ -226,27 +248,27 @@ def agent(observation, configuration):
     for city in player.cities.values():
         for city_tile in city.citytiles:
             if city_tile.can_act():
-                # 保有unit数(worker)よりもcity tileの数が多いならworkerを追加
-                if unit_count < player.city_tile_count: 
-                    actions.append(city_tile.build_worker())
-                    unit_count += 1
-                # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
-                elif not player.researched_uranium():
-                    actions.append(city_tile.research())
-                    player.research_points += 1
+                state = make_input(observation, (city_tile.pos.x, city_tile.pos.y), n_obs_channel=23, target="city")
+                with torch.no_grad():
+                    p, v = city_model(torch.from_numpy(state).unsqueeze(0))
+                policy = p.squeeze(0).numpy()
+                value = v.item()
+                action, unit_count = get_city_action(policy, city_tile, unit_count, player)
+                if action != None:
+                    actions.append(action)
     
     # Worker Actions
     dest = []
     for unit in player.units:
         if unit.can_act() and (game_state.turn % 40 < 30 or not in_city(unit.pos)):
-            state = make_input(observation, unit.id, n_obs_channel=23)
+            state = make_input(observation, unit.id, n_obs_channel=23, target="unit")
             with torch.no_grad():
-                p, v = model(torch.from_numpy(state).unsqueeze(0))
+                p, v = unit_model(torch.from_numpy(state).unsqueeze(0))
 
             policy = p.squeeze(0).numpy()
             value = v.item()
 
-            action, pos = get_action(policy, unit, dest, observation, player.team)
+            action, pos = get_unit_action(policy, unit, dest, observation, player.team)
             actions.append(action)
             dest.append(pos)
 

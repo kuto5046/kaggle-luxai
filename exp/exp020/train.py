@@ -47,13 +47,14 @@ def seed_everything(seed: int = 42):
     torch.backends.cudnn.deterministic = True  # type: ignore
     torch.backends.cudnn.benchmark = False  # type: ignore
 
-def to_label(action):
+def to_label(action, target):
     """action記号をラベルに変換する関数
     扱っているのはunit系のactionのみでcity系のactionはNone扱い？
     unit系のactionにはtransferやpillageも含まれるがそれらのラベルはNone扱い？
 
     Args:
         action (list): [description]
+        target (str): "unit" or "city"
 
     Returns:
         [type]: [description]
@@ -62,23 +63,39 @@ def to_label(action):
     input: action=['m u_1 w']
     strs = ['m', 'u_1', 'w']
     strs[0] - action
-    strs[1] - unit_id
-    strs[2] - direction(if action is 'm')
+    strs[1] - x
+    strs[2] - y
     """
     strs = action.split(' ')
-    unit_id = strs[1]
-    if strs[0] == 'm':
-        label_dict = {'c': None, 'n': 0, 's': 1, 'w': 2, 'e': 3}
-        label = label_dict[strs[2]]
-    elif strs[0] == 'bcity':
-        label = 4
-    elif strs[0] == 'p':  # pillage
-        label = 5
-    elif strs[0] == 't':
-        label = 6
-    else:
-        label = None
-    return unit_id, label
+    if target == "unit":  # unit action
+        unit_id = strs[1]
+        if strs[0] == 'm':
+            label_dict = {'c': None, 'n': 0, 's': 1, 'w': 2, 'e': 3}
+            label = label_dict[strs[2]]
+        elif strs[0] == 'bcity':
+            label = 4
+        # elif strs[0] == 'p':  # pillage
+        #     label = 5
+        elif strs[0] == 't':
+            label = 5
+        else:
+            label = None
+        return unit_id, label
+    else:  # city action
+        if strs[0] == 'r':  # research
+            label = 0
+            tile_pos = (int(strs[1]), int(strs[2]))
+        elif strs[0] == 'bw':  # build worker
+            label = 1
+            tile_pos = (int(strs[1]), int(strs[2]))
+        # elif strs[0] == 'bc':  # build cargo
+        #     label = 2
+        #     tile_pos = (int(strs[1]), int(strs[2]))
+        else:
+            label = None
+            tile_pos = None
+        return tile_pos, label
+
 
 def depleted_resources(obs):
     for u in obs['updates']:
@@ -106,7 +123,7 @@ def get_reward(json_load, index):
         NotImplementedError
     return reward
 
-def create_dataset_from_json(episode_dir, team_name='Toad Brigade', only_win=False): 
+def create_dataset_from_json(episode_dir, target, team_name='Toad Brigade', only_win=False): 
     logger.info(f"Team: {team_name}")
     obses = {}
     samples = []
@@ -169,19 +186,19 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade', only_win=Fal
                                 
                 for action in actions:
                     # moveとbuild cityのaction labelのみが取得される?
-                    unit_id, label = to_label(action)
+                    target_id, label = to_label(action, target)
                     if label is not None:
-                        samples.append((obs_id, unit_id, label, reward))
+                        samples.append((obs_id, target_id, label, reward))
     logger.info(f"空のactionsの数: {non_actions_count}")
     return obses, samples
 
 
 # Input for Neural Network
-def make_input(obs, unit_id, n_obs_channel):
+def make_input(obs, target_id, n_obs_channel, target):
     """obs情報をnnが学習しやすい形式に変換する関数
     全て0~1に正規化されている
-    1 ch: 全部のunitの位置  
-    2 ch: 全部のunitが持つresourceの合計量(/100で正規化？)(3つまとめて良い？)  
+    1 ch: actionの対象のunit(city)の位置  
+    2 ch: actionの対象のunitが持つresourceの合計量(/100で正規化？)(3つまとめて良い？)  
 
     3 ch: 自チームのworker-unitの位置 
     4 ch: cooldownの状態(/6で正規化)
@@ -223,7 +240,11 @@ def make_input(obs, unit_id, n_obs_channel):
     # (c, w, h)
     # mapの最大サイズが(32,32)なのでそれに合わせている
     b = np.zeros((n_obs_channel, 32, 32), dtype=np.float32)
-    
+
+    if target == "city":
+        # x:target_id[0], y:target_id[1]
+        b[0, target_id[0], target_id[1]] = 1 #(1,1)  # 0chは何も情報がない
+
     for update in obs['updates']:
         strs = update.split(' ')
         input_identifier = strs[0]
@@ -234,7 +255,8 @@ def make_input(obs, unit_id, n_obs_channel):
             wood = int(strs[7])
             coal = int(strs[8])
             uranium = int(strs[9])
-            if unit_id == strs[3]:
+
+            if target_id == strs[3]:
                 # Position and Cargo
                 b[:2, x, y] = (
                     1,
@@ -298,18 +320,19 @@ def make_input(obs, unit_id, n_obs_channel):
 
 
 class LuxDataset(Dataset):
-    def __init__(self, obses, samples, n_obs_channel):
+    def __init__(self, obses, samples, n_obs_channel, target):
         self.obses = obses
         self.samples = samples
         self.n_obs_channel = n_obs_channel
+        self.target = target
         
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        obs_id, unit_id, action, reward = self.samples[idx]
+        obs_id, target_id, action, reward = self.samples[idx]
         obs = self.obses[obs_id]
-        state = make_input(obs, unit_id, self.n_obs_channel)
+        state = make_input(obs, target_id, self.n_obs_channel, self.target)
         
         return state, action, reward
 
@@ -356,7 +379,7 @@ class LuxNet(nn.Module):
         v = torch.tanh(self.head_v(torch.cat([h_head, h_avg], dim=1)))  # value
         return p, v.squeeze(dim=1)
 
-def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, num_epochs=2):
+def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, target, num_epochs=2):
     best_acc = 0.0
 
     for epoch in range(num_epochs):
@@ -407,48 +430,56 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
         
         if epoch_acc > best_acc:
             traced = torch.jit.trace(model.cpu(), torch.rand(1, n_obs_channel, 32, 32))
-            traced.save('best.pth')
+            traced.save(f'{target}_best.pth')
             best_acc = epoch_acc
 
      
 def main():
+    # param
+    target_list = ["city", "unit"]
+    num_epochs = 10
+    n_obs_channel = 23
+    batch_size = 64
     seed = 42
+
     seed_everything(seed)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
     episode_dir = '../../input/lux_ai_toad_episodes_1007/'
-    obses, samples = create_dataset_from_json(episode_dir, only_win=True)
-    logger.info(f'obses:{len(obses)} samples:{len(samples)}')
-
-    labels = [sample[2] for sample in samples]
-    # actions = ['north', 'south', 'west', 'east', 'bcity']
-    actions = ['north', 'south', 'west', 'east', 'bcity', 'pillage', 'transfer']
-    for value, count in zip(*np.unique(labels, return_counts=True)):
-        logger.info(f'{actions[value]:^5}: {count:>3}')
-    
-    n_obs_channel = 23
-    model = LuxNet(len(actions), n_obs_channel)
-    train, val = train_test_split(samples, test_size=0.1, random_state=seed, stratify=labels)
-    batch_size = 64
-
-    train_loader = DataLoader(
-        LuxDataset(obses, train, n_obs_channel), 
-        batch_size=batch_size, 
-        shuffle=True, 
-        num_workers=2
-    )
-    val_loader = DataLoader(
-        LuxDataset(obses, val, n_obs_channel), 
-        batch_size=batch_size, 
-        shuffle=False, 
-        num_workers=2
-    )
-    dataloaders_dict = {"train": train_loader, "val": val_loader}
-    p_criterion = nn.CrossEntropyLoss()
-    v_criterion = nn.MSELoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-
-    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, num_epochs=10)
+    actions_dict = {
+        'unit':['north', 'south', 'west', 'east', 'bcity', 'transfer'], 
+        'city':['research', 'bworker']
+        }
+    for target in target_list:
+        logger.info("="*20)
+        logger.info(f"Training {target}'s action")
+        logger.info("="*20)
+        obses, samples = create_dataset_from_json(episode_dir, target, only_win=True)
+        logger.info(f'obses:{len(obses)} samples:{len(samples)}')
+        labels = [sample[2] for sample in samples]
+        actions = actions_dict[target]
+        for value, count in zip(*np.unique(labels, return_counts=True)):
+            logger.info(f'{actions[value]:^5}: {count:>3}')
+         
+        model = LuxNet(len(actions), n_obs_channel)
+        train, val = train_test_split(samples, test_size=0.1, random_state=seed, stratify=labels)
+        train_loader = DataLoader(
+            LuxDataset(obses, train, n_obs_channel, target), 
+            batch_size=batch_size, 
+            shuffle=True, 
+            num_workers=2
+        )
+        val_loader = DataLoader(
+            LuxDataset(obses, val, n_obs_channel, target), 
+            batch_size=batch_size, 
+            shuffle=False, 
+            num_workers=2
+        )
+        dataloaders_dict = {"train": train_loader, "val": val_loader}
+        p_criterion = nn.CrossEntropyLoss()
+        v_criterion = nn.MSELoss()
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+        train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, target, num_epochs)
     wandb.finish()
 
 if __name__ =='__main__':

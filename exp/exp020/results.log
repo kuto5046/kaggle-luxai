@@ -1,0 +1,60 @@
+2021-10-12 06:52:43,719 - INFO - logger set up
+2021-10-12 06:52:44,706 - INFO - ====================
+2021-10-12 06:52:44,706 - INFO - Training city's action
+2021-10-12 06:52:44,706 - INFO - ====================
+2021-10-12 06:52:44,706 - INFO - Team: Toad Brigade
+2021-10-12 06:52:53,540 - INFO - 空のactionsの数: 0
+2021-10-12 06:52:53,541 - INFO - obses:74441 samples:63420
+2021-10-12 06:52:53,552 - INFO - research: 44449
+2021-10-12 06:52:53,552 - INFO - bworker: 18971
+2021-10-12 06:53:13,663 - INFO - Epoch 1/10 |  val  | Loss(policy): 0.4137 | Loss(value): 0.0044 | Acc: 0.8297
+2021-10-12 06:53:32,307 - INFO - Epoch 2/10 |  val  | Loss(policy): 0.3157 | Loss(value): 0.0044 | Acc: 0.8702
+2021-10-12 06:53:50,957 - INFO - Epoch 3/10 |  val  | Loss(policy): 0.2766 | Loss(value): 0.0044 | Acc: 0.8928
+2021-10-12 06:54:09,721 - INFO - Epoch 4/10 |  val  | Loss(policy): 0.2814 | Loss(value): 0.0044 | Acc: 0.8885
+2021-10-12 06:54:28,375 - INFO - Epoch 5/10 |  val  | Loss(policy): 0.2765 | Loss(value): 0.0043 | Acc: 0.8910
+2021-10-12 06:54:47,069 - INFO - Epoch 6/10 |  val  | Loss(policy): 0.2549 | Loss(value): 0.0043 | Acc: 0.8969
+2021-10-12 06:55:05,815 - INFO - Epoch 7/10 |  val  | Loss(policy): 0.2535 | Loss(value): 0.0044 | Acc: 0.8980
+2021-10-12 06:55:24,602 - INFO - Epoch 8/10 |  val  | Loss(policy): 0.2352 | Loss(value): 0.0043 | Acc: 0.9037
+2021-10-12 06:55:43,308 - INFO - Epoch 9/10 |  val  | Loss(policy): 0.2639 | Loss(value): 0.0043 | Acc: 0.8958
+2021-10-12 06:56:01,991 - INFO - Epoch 10/10 |  val  | Loss(policy): 0.2778 | Loss(value): 0.0043 | Acc: 0.8956
+2021-10-12 07:13:28,109 - INFO - logger set up
+2021-10-12 07:13:29,140 - INFO - ====================
+2021-10-12 07:13:29,140 - INFO - Training city's action
+2021-10-12 07:13:29,140 - INFO - ====================
+2021-10-12 07:13:29,141 - INFO - Team: Toad Brigade
+2021-10-12 07:13:37,728 - INFO - 空のactionsの数: 0
+2021-10-12 07:13:37,729 - INFO - obses:74441 samples:63420
+2021-10-12 07:13:37,736 - INFO - research: 44449
+2021-10-12 07:13:37,736 - INFO - bworker: 18971
+2021-10-12 07:13:57,745 - INFO - Epoch 1/10 |  val  | Loss(policy): 0.4137 | Loss(value): 0.0044 | Acc: 0.8297
+2021-10-12 07:14:16,248 - INFO - Epoch 2/10 |  val  | Loss(policy): 0.3157 | Loss(value): 0.0044 | Acc: 0.8702
+2021-10-12 07:14:34,838 - INFO - Epoch 3/10 |  val  | Loss(policy): 0.2766 | Loss(value): 0.0044 | Acc: 0.8928
+2021-10-12 07:14:53,479 - INFO - Epoch 4/10 |  val  | Loss(policy): 0.2814 | Loss(value): 0.0044 | Acc: 0.8885
+2021-10-12 07:15:12,028 - INFO - Epoch 5/10 |  val  | Loss(policy): 0.2765 | Loss(value): 0.0043 | Acc: 0.8910
+2021-10-12 07:15:30,616 - INFO - Epoch 6/10 |  val  | Loss(policy): 0.2549 | Loss(value): 0.0043 | Acc: 0.8969
+2021-10-12 07:15:49,373 - INFO - Epoch 7/10 |  val  | Loss(policy): 0.2535 | Loss(value): 0.0044 | Acc: 0.8980
+2021-10-12 07:16:08,100 - INFO - Epoch 8/10 |  val  | Loss(policy): 0.2352 | Loss(value): 0.0043 | Acc: 0.9037
+2021-10-12 07:16:26,884 - INFO - Epoch 9/10 |  val  | Loss(policy): 0.2639 | Loss(value): 0.0043 | Acc: 0.8958
+2021-10-12 07:16:45,468 - INFO - Epoch 10/10 |  val  | Loss(policy): 0.2778 | Loss(value): 0.0043 | Acc: 0.8956
+2021-10-12 07:16:45,469 - INFO - ====================
+2021-10-12 07:16:45,469 - INFO - Training unit's action
+2021-10-12 07:16:45,469 - INFO - ====================
+2021-10-12 07:16:45,469 - INFO - Team: Toad Brigade
+2021-10-12 07:16:57,589 - INFO - 空のactionsの数: 0
+2021-10-12 07:16:57,596 - INFO - obses:74441 samples:300496
+2021-10-12 07:16:57,628 - INFO - north: 61693
+2021-10-12 07:16:57,628 - INFO - south: 58385
+2021-10-12 07:16:57,628 - INFO - west : 62994
+2021-10-12 07:16:57,628 - INFO - east : 61653
+2021-10-12 07:16:57,628 - INFO - bcity: 26410
+2021-10-12 07:16:57,628 - INFO - transfer: 29361
+2021-10-12 07:18:25,652 - INFO - Epoch 1/10 |  val  | Loss(policy): 0.8083 | Loss(value): 0.0065 | Acc: 0.6777
+2021-10-12 07:19:53,487 - INFO - Epoch 2/10 |  val  | Loss(policy): 0.6529 | Loss(value): 0.0064 | Acc: 0.7413
+2021-10-12 07:21:21,415 - INFO - Epoch 3/10 |  val  | Loss(policy): 0.6482 | Loss(value): 0.0064 | Acc: 0.7451
+2021-10-12 07:22:49,252 - INFO - Epoch 4/10 |  val  | Loss(policy): 0.6068 | Loss(value): 0.0061 | Acc: 0.7615
+2021-10-12 07:24:17,193 - INFO - Epoch 5/10 |  val  | Loss(policy): 0.5758 | Loss(value): 0.0052 | Acc: 0.7766
+2021-10-12 07:25:45,083 - INFO - Epoch 6/10 |  val  | Loss(policy): 0.5840 | Loss(value): 0.0043 | Acc: 0.7722
+2021-10-12 07:27:13,077 - INFO - Epoch 7/10 |  val  | Loss(policy): 0.5527 | Loss(value): 0.0032 | Acc: 0.7851
+2021-10-12 07:28:41,178 - INFO - Epoch 8/10 |  val  | Loss(policy): 0.5560 | Loss(value): 0.0028 | Acc: 0.7838
+2021-10-12 07:30:09,056 - INFO - Epoch 9/10 |  val  | Loss(policy): 0.5467 | Loss(value): 0.0022 | Acc: 0.7859
+2021-10-12 07:31:37,305 - INFO - Epoch 10/10 |  val  | Loss(policy): 0.5257 | Loss(value): 0.0023 | Acc: 0.7962
