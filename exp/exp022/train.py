@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 from sklearn.model_selection import train_test_split
-
+from sklearn.metrics import confusion_matrix
 
 def get_logger(level=INFO, out_file=None):
     logger = logging.getLogger()
@@ -433,13 +433,31 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
             traced.save(f'{target}_best.pth')
             best_acc = epoch_acc
 
-     
+def validate_model(dataloaders_dict, target, actions_dict):
+        model = torch.jit.load(f'{target}_best.pth')
+        model.eval()
+        preds = []
+        targets = []
+        for item in tqdm(dataloaders_dict["val"], leave=False):
+            states = item[0].float()
+            actions = item[1].long()
+            with torch.no_grad():
+                policy, value = model(states)
+            preds.append(np.argmax(policy.numpy(), axis=1))
+            targets.append(actions.numpy())
+        
+        cm = confusion_matrix(np.concatenate(targets), np.concatenate(preds))
+        logger.info("confusion matrix for {target}")
+        logger.info(actions_dict[target])
+        logger.info(f"\n{cm}")
+
+
 def main():
     # param
     target_list = ["city", "unit"]
     num_epochs = 10
     n_obs_channel = 23
-    batch_size = 64
+    batch_size = 1028 # 2056
     seed = 42
 
     seed_everything(seed)
@@ -480,6 +498,7 @@ def main():
         v_criterion = nn.MSELoss()
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
         train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, target, num_epochs)
+        validate_model(dataloaders_dict, target, actions_dict)
     wandb.finish()
 
 if __name__ =='__main__':

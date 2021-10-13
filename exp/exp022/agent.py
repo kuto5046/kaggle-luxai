@@ -1,6 +1,9 @@
 import os
 import numpy as np
 import torch
+import torch.nn.functional as F
+import random
+from pathlib import Path 
 from lux.game import Game
 from lux.game_map import Position
 
@@ -210,6 +213,10 @@ def get_unit_action(policy, unit, dest, obs, own_team):
 
     # 行動確率の高い順に考える
     for label in np.argsort(policy)[::-1]:
+        # 選択確率が0.5以下なら行動しない
+        if policy[label] < 0.5:
+            break
+
         act = unit_actions[label]
         pos = unit.pos.translate(act[-1], 1) or unit.pos  # moveの場合移動pos/それ以外の場合現在のpos
 
@@ -222,17 +229,25 @@ def get_unit_action(policy, unit, dest, obs, own_team):
                 if (sum(list(unit_resource.values())) == 0)or(len(adjacent_units)==0):
                     continue
                 #adjacent_units: transfer先の候補となる隣接unit
-                # 優先順位としてはwood -> coal -> uranium
+                # 優先順位としてはuranium -> coal -> wood
                 # 1つでも保有していればそれをtransfer用のresourceとする
-                for resource_type, amount in unit_resource.items():
+                resource_type = None
+                for r_type, amount in unit_resource.items():
+                    # 保有している資源が1つでもあればresource_typeを更新
+                    # これにより上で示した優先度でresource_typeが選ばれる
                     if amount > 0:
-                        break
-                assert amount > 0
-
-                transfer_unit = adjacent_units[0]  # とりあえず仮でこうしておく
+                        resource_type = r_type
+                        
+                if len(adjacent_units) == 1:
+                    transfer_unit = adjacent_units[0]  # とりあえず仮でこうしておく
+                else:
+                    # ここをMCTSする？
+                    # でも探索するには選択肢が少なすぎる気もする
+                    transfer_unit = random.choice(adjacent_units)
+                
                 # actというtupleにdest_id, resource_type, amountを追加
                 # act = ('transfer', transfer_unit, resource_type, amount)d
-                return unit.transfer(transfer_unit, resource_type, amount), pos
+                return unit.transfer(transfer_unit, resource_type, 2000), pos  # 2000がmaxで余ったら戻るので問題ない？
             
             return call_func(unit, *act), pos         
             
@@ -253,7 +268,8 @@ def agent(observation, configuration):
                 state = make_input(observation, (city_tile.pos.x, city_tile.pos.y), n_obs_channel=23, target="city")
                 with torch.no_grad():
                     p, v = city_model(torch.from_numpy(state).unsqueeze(0))
-                policy = p.squeeze(0).numpy()
+                
+                policy = torch.sigmoid(p).squeeze(0).numpy()
                 value = v.item()
                 action, unit_count = get_city_action(policy, city_tile, unit_count, player)
                 if action != None:
@@ -267,7 +283,8 @@ def agent(observation, configuration):
             with torch.no_grad():
                 p, v = unit_model(torch.from_numpy(state).unsqueeze(0))
 
-            policy = p.squeeze(0).numpy()
+            policy = F.softmax(p).squeeze(0).numpy()
+            # print(policy)
             value = v.item()
 
             action, pos = get_unit_action(policy, unit, dest, observation, player.team)

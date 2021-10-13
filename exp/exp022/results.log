@@ -1,0 +1,55 @@
+2021-10-13 21:02:26,034 - INFO - logger set up
+2021-10-13 21:02:27,090 - INFO - ====================
+2021-10-13 21:02:27,090 - INFO - Training city's action
+2021-10-13 21:02:27,090 - INFO - ====================
+2021-10-13 21:02:27,090 - INFO - Team: Toad Brigade
+2021-10-13 21:02:35,858 - INFO - 空のactionsの数: 0
+2021-10-13 21:02:35,859 - INFO - obses:74441 samples:63420
+2021-10-13 21:02:35,866 - INFO - research: 44449
+2021-10-13 21:02:35,866 - INFO - bworker: 18971
+2021-10-13 21:02:53,879 - INFO - Epoch 1/10 |  val  | Loss(policy): 0.4430 | Loss(value): 0.0053 | Acc: 0.8042
+2021-10-13 21:03:10,577 - INFO - Epoch 2/10 |  val  | Loss(policy): 0.5027 | Loss(value): 0.0051 | Acc: 0.7830
+2021-10-13 21:03:27,167 - INFO - Epoch 3/10 |  val  | Loss(policy): 0.3274 | Loss(value): 0.0045 | Acc: 0.8672
+2021-10-13 21:03:44,130 - INFO - Epoch 4/10 |  val  | Loss(policy): 0.3121 | Loss(value): 0.0044 | Acc: 0.8773
+2021-10-13 21:04:01,072 - INFO - Epoch 5/10 |  val  | Loss(policy): 0.3110 | Loss(value): 0.0048 | Acc: 0.8780
+2021-10-13 21:04:18,036 - INFO - Epoch 6/10 |  val  | Loss(policy): 0.3536 | Loss(value): 0.0048 | Acc: 0.8664
+2021-10-13 21:04:34,907 - INFO - Epoch 7/10 |  val  | Loss(policy): 0.3220 | Loss(value): 0.0045 | Acc: 0.8764
+2021-10-13 21:04:51,841 - INFO - Epoch 8/10 |  val  | Loss(policy): 0.2993 | Loss(value): 0.0046 | Acc: 0.8841
+2021-10-13 21:05:08,854 - INFO - Epoch 9/10 |  val  | Loss(policy): 0.2869 | Loss(value): 0.0044 | Acc: 0.8852
+2021-10-13 21:05:25,939 - INFO - Epoch 10/10 |  val  | Loss(policy): 0.3285 | Loss(value): 0.0045 | Acc: 0.8713
+2021-10-13 21:05:36,112 - INFO - confusion matrix for {target}
+2021-10-13 21:05:36,112 - INFO - ['research', 'bworker']
+2021-10-13 21:05:36,112 - INFO - 
+[[4266  179]
+ [ 549 1348]]
+2021-10-13 21:05:36,116 - INFO - ====================
+2021-10-13 21:05:36,117 - INFO - Training unit's action
+2021-10-13 21:05:36,117 - INFO - ====================
+2021-10-13 21:05:36,117 - INFO - Team: Toad Brigade
+2021-10-13 21:05:48,324 - INFO - 空のactionsの数: 0
+2021-10-13 21:05:48,332 - INFO - obses:74441 samples:300496
+2021-10-13 21:05:48,364 - INFO - north: 61693
+2021-10-13 21:05:48,365 - INFO - south: 58385
+2021-10-13 21:05:48,365 - INFO - west : 62994
+2021-10-13 21:05:48,365 - INFO - east : 61653
+2021-10-13 21:05:48,365 - INFO - bcity: 26410
+2021-10-13 21:05:48,365 - INFO - transfer: 29361
+2021-10-13 21:07:04,518 - INFO - Epoch 1/10 |  val  | Loss(policy): 0.9133 | Loss(value): 0.0067 | Acc: 0.6364
+2021-10-13 21:08:20,627 - INFO - Epoch 2/10 |  val  | Loss(policy): 0.8122 | Loss(value): 0.0066 | Acc: 0.6835
+2021-10-13 21:09:36,696 - INFO - Epoch 3/10 |  val  | Loss(policy): 0.6965 | Loss(value): 0.0066 | Acc: 0.7245
+2021-10-13 21:10:53,021 - INFO - Epoch 4/10 |  val  | Loss(policy): 0.7035 | Loss(value): 0.0066 | Acc: 0.7259
+2021-10-13 21:12:09,407 - INFO - Epoch 5/10 |  val  | Loss(policy): 0.6401 | Loss(value): 0.0066 | Acc: 0.7504
+2021-10-13 21:13:25,778 - INFO - Epoch 6/10 |  val  | Loss(policy): 0.6176 | Loss(value): 0.0066 | Acc: 0.7589
+2021-10-13 21:14:42,137 - INFO - Epoch 7/10 |  val  | Loss(policy): 0.6507 | Loss(value): 0.0066 | Acc: 0.7477
+2021-10-13 21:15:58,790 - INFO - Epoch 8/10 |  val  | Loss(policy): 0.6942 | Loss(value): 0.0066 | Acc: 0.7378
+2021-10-13 21:17:15,401 - INFO - Epoch 9/10 |  val  | Loss(policy): 0.5881 | Loss(value): 0.0066 | Acc: 0.7705
+2021-10-13 21:18:31,448 - INFO - Epoch 10/10 |  val  | Loss(policy): 0.6189 | Loss(value): 0.0066 | Acc: 0.7644
+2021-10-13 21:19:17,443 - INFO - confusion matrix for {target}
+2021-10-13 21:19:17,443 - INFO - ['north', 'south', 'west', 'east', 'bcity', 'transfer']
+2021-10-13 21:19:17,443 - INFO - 
+[[4304  561  603  420   96  185]
+ [ 260 4418  475  370   84  232]
+ [ 281  416 5066  286   78  173]
+ [ 321  466  464 4606  112  196]
+ [  93  100  170   98 2110   70]
+ [  54   69   75   55   30 2653]]
