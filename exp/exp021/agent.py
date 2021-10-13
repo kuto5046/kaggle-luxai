@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import torch
+import torch.nn.functional as F
 from lux.game import Game
 from lux.game_map import Position
 
@@ -219,7 +220,10 @@ def get_unit_action(policy, unit, dest, obs, own_team):
         # 既に決定している他のunitと移動先が被っていないorcity内であれば
         if pos not in dest or in_city(pos):
             if act[0] == 'noaction':
-                return None, pos
+                if policy[label] > 0.9:
+                    return None, pos
+                else:
+                    continue
             elif act[0] == 'transfer':
                 adjacent_units, unit_resource = get_adjacent_units_and_unit_resource(unit, obs, own_team)
                 # resourceを保有していないor隣接するunitがいない場合はtransferはしない
@@ -271,7 +275,8 @@ def agent(observation, configuration):
             with torch.no_grad():
                 p, v = unit_model(torch.from_numpy(state).unsqueeze(0))
 
-            policy = p.squeeze(0).numpy()
+            policy = F.softmax(p).squeeze(0).numpy()
+            # print(policy)
             value = v.item()
 
             action, pos = get_unit_action(policy, unit, dest, observation, player.team)
