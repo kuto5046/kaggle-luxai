@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import os
 from numpy.core.overrides import array_function_from_dispatcher
+from torch.utils import data
 import wandb
 import random
 import logging
@@ -15,7 +16,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 from sklearn.model_selection import train_test_split
-
+from sklearn.metrics import confusion_matrix
 
 def get_logger(level=INFO, out_file=None):
     logger = logging.getLogger()
@@ -49,8 +50,8 @@ def seed_everything(seed: int = 42):
 
 def to_label(action, target):
     """action記号をラベルに変換する関数
-    扱っているのはunit系のactionのみでcity系のactionはNone扱い？
-    unit系のactionにはtransferやpillageも含まれるがそれらのラベルはNone扱い？
+    label = 0は行動しないという正解ラベル
+    この関数内ではラベルは振らない
 
     Args:
         action (list): [description]
@@ -70,28 +71,29 @@ def to_label(action, target):
     if target == "unit":  # unit action
         unit_id = strs[1]
         if strs[0] == 'm':
-            label_dict = {'c': None, 'n': 0, 's': 1, 'w': 2, 'e': 3}
+            label_dict = {'c': None, 'n': 1, 's': 2, 'w': 3, 'e': 4}
             label = label_dict[strs[2]]
         elif strs[0] == 'bcity':
-            label = 4
+            label = 5
         # elif strs[0] == 'p':  # pillage
         #     label = 5
         elif strs[0] == 't':
-            label = 5
+            label = 6
         else:
             label = None
         return unit_id, label
     else:  # city action
         if strs[0] == 'r':  # research
-            label = 0
+            label = 1
             tile_pos = (int(strs[1]), int(strs[2]))
         elif strs[0] == 'bw':  # build worker
-            label = 1
+            label = 2
             tile_pos = (int(strs[1]), int(strs[2]))
         # elif strs[0] == 'bc':  # build cargo
         #     label = 2
         #     tile_pos = (int(strs[1]), int(strs[2]))
         else:
+            # no action
             label = None
             tile_pos = None
         return tile_pos, label
@@ -122,6 +124,38 @@ def get_reward(json_load, index):
     else:
         NotImplementedError
     return reward
+
+def get_actionable_targets(obs:dict, target:str) -> list:
+    """
+    targetがunitの場合は行動可能な全てのunit_idをlistで返す
+    targetがcityの場合は行動可能な全てのtileのpositionをlistで返す
+
+    Args:
+        obs (dict): [description]
+        target (str): "unit" or "city"
+
+    Returns:
+        list: [description]
+    """
+    if target == "unit":
+        actionable_units = []
+        for update in obs['updates']:
+            strs = update.split(' ')
+            if strs[0]=='u':
+                if (int(strs[2])==obs['player'])&(float(strs[6])<1):
+                    actionable_units.append(strs[3])
+        return actionable_units
+    else:
+        actionable_tiles = []
+        for update in obs['updates']:
+            strs = update.split(' ')
+            if strs[0]=='ct':
+                if int(strs[5])<1:
+                    pos = (int(strs[3]), int(strs[4]))  # (x,y)
+                    actionable_tiles.append(pos)
+        return actionable_tiles
+ 
+
 
 def create_dataset_from_json(episode_dir, target, team_name='Toad Brigade', only_win=False): 
     logger.info(f"Team: {team_name}")
@@ -179,16 +213,28 @@ def create_dataset_from_json(episode_dir, target, team_name='Toad Brigade', only
                     (k,v) for k,v in obs.items() 
                     if k in ['step', 'updates', 'player', 'width', 'height']
                 ])
-
+                # 現在のobsでの行動可能なunit_id or tile_posを取得
+                actionable_targets = get_actionable_targets(obs, target)
+              
                 # episode_idとstep数からobs_idを振る
                 obs_id = f'{ep_id}_{i}'
                 obses[obs_id] = obs
-                                
+                
+                acted_targets = []
                 for action in actions:
                     # moveとbuild cityのaction labelのみが取得される?
-                    target_id, label = to_label(action, target)
+                    target_id, label = to_label(action, target)            
                     if label is not None:
                         samples.append((obs_id, target_id, label, reward))
+                        acted_targets.append(target_id)
+                
+                # 行動可能なtargetが行動していない場合ラベル0を付与し学習データに追加
+                for _target_id in actionable_targets:
+                    if _target_id not in acted_targets:  
+                        samples.append((obs_id, _target_id, 0, reward))
+
+               
+                
     logger.info(f"空のactionsの数: {non_actions_count}")
     return obses, samples
 
@@ -433,10 +479,28 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
             traced.save(f'{target}_best.pth')
             best_acc = epoch_acc
 
-     
+def validate_model(dataloaders_dict, target, actions_dict):
+        model = torch.jit.load(f'{target}_best.pth')
+        model.eval()
+        preds = []
+        targets = []
+        for item in tqdm(dataloaders_dict["val"], leave=False):
+            states = item[0].float()
+            actions = item[1].long()
+            with torch.no_grad():
+                policy, value = model(states)
+            preds.append(np.argmax(policy.numpy(), axis=1))
+            targets.append(actions.numpy())
+        
+        cm = confusion_matrix(np.concatenate(targets), np.concatenate(preds))
+        logger.info("confusion matrix for {target}")
+        logger.info(actions_dict[target])
+        logger.info(f"\n{cm}")
+
+
 def main():
     # param
-    target_list = ["city", "unit"]
+    target_list = ["unit"] #["city", "unit"]
     num_epochs = 10
     n_obs_channel = 23
     batch_size = 64
@@ -447,8 +511,8 @@ def main():
     wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
     episode_dir = '../../input/lux_ai_toad_episodes_1007/'
     actions_dict = {
-        'unit':['north', 'south', 'west', 'east', 'bcity', 'transfer'], 
-        'city':['research', 'bworker']
+        'unit':['noaction', 'north', 'south', 'west', 'east', 'bcity', 'transfer'], 
+        'city':['noaction', 'research', 'bworker']
         }
     for target in target_list:
         logger.info("="*20)
@@ -480,6 +544,7 @@ def main():
         v_criterion = nn.MSELoss()
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
         train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, target, num_epochs)
+        validate_model(dataloaders_dict, target, actions_dict)
     wandb.finish()
 
 if __name__ =='__main__':

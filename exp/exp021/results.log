@@ -1,0 +1,63 @@
+2021-10-12 21:43:04,585 - INFO - logger set up
+2021-10-12 21:43:05,672 - INFO - ====================
+2021-10-12 21:43:05,672 - INFO - Training city's action
+2021-10-12 21:43:05,672 - INFO - ====================
+2021-10-12 21:43:05,672 - INFO - Team: Toad Brigade
+2021-10-12 21:43:19,131 - INFO - 空のactionsの数: 0
+2021-10-12 21:43:19,132 - INFO - obses:74441 samples:1945644
+2021-10-12 21:43:19,309 - INFO - noaction: 1882224
+2021-10-12 21:43:19,309 - INFO - research: 44449
+2021-10-12 21:43:19,309 - INFO - bworker: 18971
+2021-10-12 21:52:56,597 - INFO - Epoch 1/10 |  val  | Loss(policy): 0.0867 | Loss(value): 0.0022 | Acc: 0.9716
+2021-10-12 22:02:33,112 - INFO - Epoch 2/10 |  val  | Loss(policy): 0.0791 | Loss(value): 0.0005 | Acc: 0.9745
+2021-10-12 22:12:09,150 - INFO - Epoch 3/10 |  val  | Loss(policy): 0.0738 | Loss(value): 0.0002 | Acc: 0.9757
+2021-10-12 22:21:45,646 - INFO - Epoch 4/10 |  val  | Loss(policy): 0.0749 | Loss(value): 0.0003 | Acc: 0.9760
+2021-10-12 22:31:22,289 - INFO - Epoch 5/10 |  val  | Loss(policy): 0.0717 | Loss(value): 0.0002 | Acc: 0.9763
+2021-10-12 22:40:59,001 - INFO - Epoch 6/10 |  val  | Loss(policy): 0.0696 | Loss(value): 0.0000 | Acc: 0.9769
+2021-10-12 22:50:35,811 - INFO - Epoch 7/10 |  val  | Loss(policy): 0.0706 | Loss(value): 0.0000 | Acc: 0.9763
+2021-10-12 23:00:12,323 - INFO - Epoch 8/10 |  val  | Loss(policy): 0.0746 | Loss(value): 0.0000 | Acc: 0.9762
+2021-10-12 23:09:47,986 - INFO - Epoch 9/10 |  val  | Loss(policy): 0.0718 | Loss(value): 0.0001 | Acc: 0.9760
+2021-10-12 23:19:24,071 - INFO - Epoch 10/10 |  val  | Loss(policy): 0.0700 | Loss(value): 0.0000 | Acc: 0.9766
+2021-10-12 23:21:20,095 - INFO - confusion matrix for {target}
+2021-10-12 23:21:20,095 - INFO - 
+[[187509    616     98]
+ [  2033   2376     36]
+ [  1492    210    195]]
+2021-10-12 23:21:20,107 - INFO - ====================
+2021-10-12 23:21:20,108 - INFO - Training unit's action
+2021-10-12 23:21:20,108 - INFO - ====================
+2021-10-12 23:21:20,108 - INFO - Team: Toad Brigade
+2021-10-13 07:06:04,885 - INFO - logger set up
+2021-10-13 07:06:05,933 - INFO - ====================
+2021-10-13 07:06:05,933 - INFO - Training unit's action
+2021-10-13 07:06:05,933 - INFO - ====================
+2021-10-13 07:06:05,933 - INFO - Team: Toad Brigade
+2021-10-13 07:06:21,555 - INFO - 空のactionsの数: 0
+2021-10-13 07:06:21,556 - INFO - obses:74441 samples:1471461
+2021-10-13 07:06:21,691 - INFO - noaction: 1170965
+2021-10-13 07:06:21,691 - INFO - north: 61693
+2021-10-13 07:06:21,691 - INFO - south: 58385
+2021-10-13 07:06:21,691 - INFO - west : 62994
+2021-10-13 07:06:21,691 - INFO - east : 61653
+2021-10-13 07:06:21,691 - INFO - bcity: 26410
+2021-10-13 07:06:21,691 - INFO - transfer: 29361
+2021-10-13 07:13:33,130 - INFO - Epoch 1/10 |  val  | Loss(policy): 0.3599 | Loss(value): 0.0059 | Acc: 0.8747
+2021-10-13 07:20:44,004 - INFO - Epoch 2/10 |  val  | Loss(policy): 0.3209 | Loss(value): 0.0036 | Acc: 0.8871
+2021-10-13 07:27:55,456 - INFO - Epoch 3/10 |  val  | Loss(policy): 0.3036 | Loss(value): 0.0013 | Acc: 0.8923
+2021-10-13 07:35:07,108 - INFO - Epoch 4/10 |  val  | Loss(policy): 0.3042 | Loss(value): 0.0010 | Acc: 0.8959
+2021-10-13 07:42:18,859 - INFO - Epoch 5/10 |  val  | Loss(policy): 0.2906 | Loss(value): 0.0005 | Acc: 0.8961
+2021-10-13 07:49:31,739 - INFO - Epoch 6/10 |  val  | Loss(policy): 0.2794 | Loss(value): 0.0004 | Acc: 0.9008
+2021-10-13 07:56:43,497 - INFO - Epoch 7/10 |  val  | Loss(policy): 0.2781 | Loss(value): 0.0005 | Acc: 0.9016
+2021-10-13 08:03:55,864 - INFO - Epoch 8/10 |  val  | Loss(policy): 0.2799 | Loss(value): 0.0002 | Acc: 0.9014
+2021-10-13 08:11:08,318 - INFO - Epoch 9/10 |  val  | Loss(policy): 0.2700 | Loss(value): 0.0003 | Acc: 0.9041
+2021-10-13 08:18:20,510 - INFO - Epoch 10/10 |  val  | Loss(policy): 0.2827 | Loss(value): 0.0005 | Acc: 0.9005
+2021-10-13 08:19:48,363 - INFO - confusion matrix for {target}
+2021-10-13 08:19:48,363 - INFO - ['noaction', 'north', 'south', 'west', 'east', 'bcity', 'transfer']
+2021-10-13 08:19:48,363 - INFO - 
+[[114501    390    399    504    445    514    344]
+ [  1494   3441    338    377    323    122     74]
+ [  1442    164   3438    360    255    105     75]
+ [  1527    256    294   3850    211     87     75]
+ [  1519    229    355    325   3537    125     75]
+ [   539     25     20     26     18   1998     15]
+ [   464     49     45     47     36     23   2272]]

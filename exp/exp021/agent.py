@@ -188,12 +188,15 @@ def get_adjacent_units_and_unit_resource(unit, obs, own_team):
     return adjacent_units, unit_resource
 
 
-city_actions = [('research',), ('build_worker', )]
+city_actions = [('noaction',), ('research',), ('build_worker', )]
 def get_city_action(policy, city_tile, unit_count, player):
     # 行動確率の高い順に考える
     for label in np.argsort(policy)[::-1]:
 
         act = city_actions[label]
+        if (act[0] == "noaction"):
+            continue
+
         # if (act=="build_worker")&(unit_count < player.city_tile_count): 
         if unit_count < player.city_tile_count: 
             unit_count += 1
@@ -202,10 +205,10 @@ def get_city_action(policy, city_tile, unit_count, player):
         elif not player.researched_uranium():
             player.research_points += 1
             return city_tile.research(), unit_count
-
     return None, unit_count
 
-unit_actions = [('move', 'n'), ('move', 's'), ('move', 'w'), ('move', 'e'), ('build_city',), ('pillage',), ('transfer', )]
+
+unit_actions = [('noaction',), ('move', 'n'), ('move', 's'), ('move', 'w'), ('move', 'e'), ('build_city',), ('transfer', )]
 def get_unit_action(policy, unit, dest, obs, own_team):
 
     # 行動確率の高い順に考える
@@ -215,8 +218,9 @@ def get_unit_action(policy, unit, dest, obs, own_team):
 
         # 既に決定している他のunitと移動先が被っていないorcity内であれば
         if pos not in dest or in_city(pos):
-            
-            if act[0] == 'transfer':
+            if act[0] == 'noaction':
+                return None, pos
+            elif act[0] == 'transfer':
                 adjacent_units, unit_resource = get_adjacent_units_and_unit_resource(unit, obs, own_team)
                 # resourceを保有していないor隣接するunitがいない場合はtransferはしない
                 if (sum(list(unit_resource.values())) == 0)or(len(adjacent_units)==0):
@@ -256,7 +260,7 @@ def agent(observation, configuration):
                 policy = p.squeeze(0).numpy()
                 value = v.item()
                 action, unit_count = get_city_action(policy, city_tile, unit_count, player)
-                if action != None:
+                if action is not None:
                     actions.append(action)
     
     # Worker Actions
@@ -271,7 +275,8 @@ def agent(observation, configuration):
             value = v.item()
 
             action, pos = get_unit_action(policy, unit, dest, observation, player.team)
-            actions.append(action)
-            dest.append(pos)
+            if action is not None:
+                actions.append(action)
+                dest.append(pos)
 
     return actions
