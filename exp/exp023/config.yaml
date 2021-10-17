@@ -1,0 +1,24 @@
+basic:
+  seed: 42
+  total_timesteps: 500000
+  num_env: 12
+
+callbacks:
+  checkpoints:
+    save_freq: 10000
+    save_path: './model/'
+  eval:
+    best_model_save_path: './logs/'
+    log_path: './logs/'
+    eval_freq: 10000
+    deterministic: True
+    render: False
+
+model:
+    verbose: 0
+    tensorboard_log: "./tensorboard/"
+    learning_rate: 0.001
+    gamma: 0.998
+    gae_lambda: 0.95
+    batch_size: 1024
+    n_steps: 1024
