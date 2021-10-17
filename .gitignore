@@ -8,4 +8,6 @@ handyrl
 tmp
 notebook/
 LuxPythonEnvGym
+HandyRL
+agents
 exp/*/luxai2021

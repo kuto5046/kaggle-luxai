@@ -53,8 +53,8 @@ COPY ./requirements.txt /
 RUN pip3 install --upgrade pip && \
     pip3 install -r /requirements.txt
 # https://qiita.com/Hiroaki-K4/items/c1be8adba18b9f0b4cef
-RUN pip3 install torch==1.7.0+cu110 torchvision==0.8.1+cu110 -f https://download.pytorch.org/whl/torch_stable.html
-
+# RUN pip3 install torch==1.7.0+cu110 torchvision==0.8.1+cu110 -f https://download.pytorch.org/whl/torch_stable.html
+RUN pip3 install torch==1.9.1+cu111 torchvision==0.10.1+cu111 torchaudio==0.9.1 -f https://download.pytorch.org/whl/torch_stable.html
 # add user
 ARG DOCKER_UID=1000
 ARG DOCKER_USER=user
