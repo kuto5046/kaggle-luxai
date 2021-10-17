@@ -120,17 +120,16 @@ class AgentPolicy(AgentWithModel):
             partial(MoveAction, direction=Constants.DIRECTIONS.WEST),
             partial(MoveAction, direction=Constants.DIRECTIONS.SOUTH),
             partial(MoveAction, direction=Constants.DIRECTIONS.EAST),
-            # partial(smart_transfer_to_nearby, target_type_restriction=Constants.UNIT_TYPES.CART), # Transfer to nearby cart
+            partial(smart_transfer_to_nearby, target_type_restriction=Constants.UNIT_TYPES.CART), # Transfer to nearby cart
             partial(smart_transfer_to_nearby, target_type_restriction=Constants.UNIT_TYPES.WORKER), # Transfer to nearby worker
             SpawnCityAction,
-            # PillageAction,
+            PillageAction,
         ]
         self.actions_cities = [
             SpawnWorkerAction,
-            # SpawnCartAction,
+            SpawnCartAction,
             ResearchAction,
         ]
-        # TODO なぜsumではなくmax?
         self.action_space = spaces.Discrete(max(len(self.actions_units), len(self.actions_cities)))
 
         # Observation space: (Basic minimum for a miner agent)
@@ -172,7 +171,9 @@ class AgentPolicy(AgentWithModel):
         #   1x researched coal [cur player]
         #   1x researched uranium [cur player]
         self.observation_shape = (3 + 7 * 5 * 2 + 1 + 1 + 1 + 2 + 2 + 2 + 3,)
-        self.observation_space = spaces.Box(low=0, high=1, shape=self.observation_shape, dtype=np.float16)
+        self.observation_space = spaces.Box(low=0, high=1, shape=
+        self.observation_shape, dtype=np.float16)
+
         self.object_nodes = {}
 
     def get_agent_type(self):
