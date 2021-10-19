@@ -120,14 +120,14 @@ class AgentPolicy(AgentWithModel):
             partial(MoveAction, direction=Constants.DIRECTIONS.WEST),
             partial(MoveAction, direction=Constants.DIRECTIONS.SOUTH),
             partial(MoveAction, direction=Constants.DIRECTIONS.EAST),
-            partial(smart_transfer_to_nearby, target_type_restriction=Constants.UNIT_TYPES.CART), # Transfer to nearby cart
+            # partial(smart_transfer_to_nearby, target_type_restriction=Constants.UNIT_TYPES.CART), # Transfer to nearby cart
             partial(smart_transfer_to_nearby, target_type_restriction=Constants.UNIT_TYPES.WORKER), # Transfer to nearby worker
             SpawnCityAction,
-            PillageAction,
+            # PillageAction,
         ]
         self.actions_cities = [
             SpawnWorkerAction,
-            SpawnCartAction,
+            # SpawnCartAction,
             ResearchAction,
         ]
         self.action_space = spaces.Discrete(max(len(self.actions_units), len(self.actions_cities)))
@@ -545,13 +545,11 @@ class AgentPolicy(AgentWithModel):
             self.is_last_turn = True
             rewards["rew/r_city_tiles_end"] = city_tile_count
 
-            '''
             # Example of a game win/loss reward instead
-            if game.get_winning_team() == self.team:
-                rewards["rew/r_game_win"] = 100.0 # Win
-            else:
-                rewards["rew/r_game_win"] = -100.0 # Loss
-            '''
+            # if game.get_winning_team() == self.team:
+            #     rewards["rew/r_game_win"] = 100.0 # Win
+            # else:
+            #     rewards["rew/r_game_win"] = -100.0 # Loss
         
         reward = 0
         for name, value in rewards.items():
@@ -570,6 +568,7 @@ class AgentPolicy(AgentWithModel):
             is_first_turn (bool): True if it's the first turn of a game.
         """
         return
+    
 
     
 

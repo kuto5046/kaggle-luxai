@@ -1,0 +1,210 @@
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+
+ERROR: Critical error occurred in turn simulation.
+AttributeError("'NoneType' object has no attribute 'adjacent_city_tiles'")
+Traceback (most recent call last):
+  File "/home/user/work/exp/exp024/luxai2021/game/match_controller.py", line 313, in run_to_next_observation
+    game_over = self.game.run_turn_with_actions(self.action_buffer)
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 493, in run_turn_with_actions
+    self.handle_night()
+  File "/home/user/work/exp/exp024/luxai2021/game/game.py", line 544, in handle_night
+    if city.fuel < city.get_light_upkeep():
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 39, in get_light_upkeep
+    return len(self.city_cells) * self.configs["parameters"]["LIGHT_UPKEEP"]["CITY"] - self.get_adjacency_bonuses()
+  File "/home/user/work/exp/exp024/luxai2021/game/city.py", line 48, in get_adjacency_bonuses
+    bonus += cell.city_tile.adjacent_city_tiles * self.configs["parameters"]["CITY_ADJACENCY_BONUS"]
+AttributeError: 'NoneType' object has no attribute 'adjacent_city_tiles'
+

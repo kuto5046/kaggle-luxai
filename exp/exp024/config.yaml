@@ -1,25 +1,29 @@
 basic:
   seed: 42
-  n_envs: 12
+  n_envs: 24
   n_steps: 360
-  step_count: 500000
-  resume: False
-  pretrained_path: None
+  step_count: 10000000 #10M
+  resume: True
+  pretrained_path: ./models/best_model.zip
 
 callbacks:  
   eval:
-    best_model_save_path: './logs/'
-    log_path: './logs/'
+    best_model_save_path: './models/'
+    # log_path: './models/'
     eval_freq: 720  # Run it every 2 training iterations
-    n_eval_episodes: 30  # Run 30 games
+    n_eval_episodes: 5  # Run 5 games
     deterministic: False
     render: False
 
   checkpoints:
-    save_freq: 100000
+    save_freq: 5000  # 120000 steps
     save_path: './models/'
-    name_prefix: 'model'
-    replay_num_episodes: 5
+    name_prefix: 'rl_model'
+    verbose: 0
+
+  selfplay:
+    model_type: "latest"  # "best" or "latest"
+    load_freq_rollout: 11  # 1 rollout ≈ 12000 steps
 
 model:
     verbose: 0
