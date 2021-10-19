@@ -58,6 +58,7 @@ def seed_everything(seed: int = 42):
     torch.backends.cudnn.deterministic = True  # type: ignore
     torch.backends.cudnn.benchmark = False  # type: ignore
 
+
 class SelfPlayCallback(BaseCallback):
     """
     A custom callback that derives from ``BaseCallback``.
@@ -260,7 +261,6 @@ def main():
     #############
     # kaggleのreplayをself-playで残したい
     run.finish()
-    os.remove("log.txt")
 
 
 if __name__ == "__main__":

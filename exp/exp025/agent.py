@@ -9,6 +9,7 @@ from luxai2021.game.game import Game
 
 models = glob.glob(f'./models/rl_model_*_steps.zip')
 pretrained_model = sorted(models, key=lambda x: int(x.split('_')[-2]), reverse=True)[0]
+print(pretrained_model)
 model = PPO.load(pretrained_model)
 _agent = AgentPolicy(mode="inference", model=model)
 
@@ -35,5 +36,5 @@ def agent(observation, configuration):
     for action_object in _actions:
         action_str = action_object.to_message(game_state)
         actions.append(action_str)
-
+    print(actions)
     return actions
