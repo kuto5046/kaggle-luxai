@@ -11,3 +11,5 @@ LuxPythonEnvGym
 HandyRL
 agents
 exp/*/luxai2021
+exp/*/tensorboard
+exp/*/logs
