@@ -36,5 +36,5 @@ def agent(observation, configuration):
     for action_object in _actions:
         action_str = action_object.to_message(game_state)
         actions.append(action_str)
-    print(actions)
+    # print(actions)
     return actions

@@ -1,10 +1,12 @@
 basic:
   seed: 42
-  n_envs: 24
+  n_envs: 1
   n_steps: 360
-  step_count: 100000000 # 100M
+  step_count: 100000000 # 50M
   resume: True
   pretrained_path: ./models/best_model.zip
+  model_update_step_freq: 50000
+
 
 callbacks:  
   eval:

@@ -14,17 +14,18 @@ import yaml
 import wandb  
 from stable_baselines3 import PPO  # pip install stable-baselines3
 from stable_baselines3.common.callbacks import CallbackList, EvalCallback, CheckpointCallback
-from stable_baselines3.common.utils import set_random_seed, get_schedule_fn
+from stable_baselines3.common.utils import set_random_seed, get_schedule_fn, get_device
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from wandb.integration.sb3 import WandbCallback
 
-from agent_policy import AgentPolicy
+from agent_policy import AgentPolicy, BotAgent
 from luxai2021.env.agent import Agent
 from luxai2021.env.lux_env import LuxEnvironment, SaveReplayAndModelCallback
 from luxai2021.game.constants import LuxMatchConfigs_Default
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.logger import Logger, configure
-
+from luxai2021.game.game import Game
+        
 
 def get_logger(level=INFO, out_file=None):
     logger = logging.getLogger()
@@ -154,6 +155,7 @@ def main():
     step_count = config["basic"]["step_count"]
     resume = config["basic"]["resume"]
     pretrained_path = config["basic"]["pretrained_path"]
+    model_update_step_freq = config["basic"]["model_update_step_freq"]
     ckpt_params = config['callbacks']['checkpoints']
     eval_params = config['callbacks']['eval']
     selfplay_params = config['callbacks']['selfplay']
@@ -173,7 +175,6 @@ def main():
     # Run a training job
     configs = LuxMatchConfigs_Default
 
-
     ##############
     #    agent
     ##############
@@ -181,24 +182,28 @@ def main():
 
     if resume:
         # agent
-        opponent = AgentPolicy(mode="train")
-        player = AgentPolicy(mode="train")
+        old_model = PPO.load(pretrained_path, device="cpu")
+        opponent = AgentPolicy(mode="inference", model=old_model)
+        player = AgentPolicy(mode="train", model=old_model)
 
         #  environmnet
         if n_envs == 1:
             env = LuxEnvironment(configs=configs,
                                 learning_agent=player,
-                                opponent_agent=opponent)
+                                opponent_agent=opponent, 
+                                model_update_step_freq=model_update_step_freq)
         else:
             env = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
-                                                        learning_agent=AgentPolicy(mode="train"),
-                                                        opponent_agent=opponent), i) for i in range(n_envs)])
+                                                         learning_agent=AgentPolicy(mode="train", model=old_model),
+                                                         opponent_agent=opponent,
+                                                         model_update_step_freq=model_update_step_freq), i) for i in range(n_envs)])
 
         # by default previous model params are used (lr, batch size, gamma...)
-        model = PPO.load(pretrained_path)
-        model.set_env(env=env)
-        # Update the learning rate
-        model.lr_schedule = get_schedule_fn(model_params["learning_rate"])
+        # model = PPO.load(pretrained_path)
+        # model.set_env(env=env)
+        # # Update the learning rate
+        # model.lr_schedule = get_schedule_fn(model_params["learning_rate"])
+        model = PPO("MlpPolicy", env, **model_params) 
     else:
         # agent
         opponent = Agent()
@@ -208,11 +213,14 @@ def main():
         if n_envs == 1:
             env = LuxEnvironment(configs=configs,
                                 learning_agent=player,
-                                opponent_agent=opponent)
+                                opponent_agent=opponent,
+                                model_update_step_freq=model_update_step_freq)
         else:
             env = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
-                                                        learning_agent=AgentPolicy(mode="train"),
-                                                        opponent_agent=opponent), i) for i in range(n_envs)])
+                                                         learning_agent=AgentPolicy(mode="train"),
+                                                         opponent_agent=opponent,
+                                                         model_update_step_freq=model_update_step_freq), i) for i in range(n_envs)])
+ 
         # model
         model = PPO("MlpPolicy", env, **model_params) 
 
@@ -222,7 +230,7 @@ def main():
     callbacks = []
     callbacks.append(WandbCallback())
     callbacks.append(CheckpointCallback(**ckpt_params))
-    callbacks.append(SelfPlayCallback(**selfplay_params))
+    # callbacks.append(SelfPlayCallback(**selfplay_params))
 
     # Save a checkpoint and 5 match replay files every 100K steps
     # callbacks.append(
