@@ -11,8 +11,7 @@ from luxai2021.env.agent import Agent, AgentWithModel
 from luxai2021.game.actions import *
 from luxai2021.game.game_constants import GAME_CONSTANTS
 from luxai2021.game.position import Position
-sys.path.append("../../")
-from agents.rulebased import agent as rulebased_agent
+
 
 # https://codereview.stackexchange.com/questions/28207/finding-the-closest-point-to-a-list-of-points
 def closest_node(node, nodes):
@@ -99,31 +98,6 @@ def smart_transfer_to_nearby(game, team, unit_id, unit, target_type_restriction=
             resource_amount = target_unit.get_cargo_space_left()
     
     return TransferAction(team, unit_id, target_unit_id, resource_type, resource_amount)
-
-
-class BotAgent(Agent):
-    def __init__(self) -> None:
-        """
-        Implements an agent opponent
-        """
-
-    def process_turn(self, game, team):
-        """
-        Decides on a set of actions for the current turn.
-        :param game:
-        :param team:
-        :return: Array of actions to perform for this turn.
-        """
-        state = game.to_state_object()
-        observation = self.get_observation(game)
-
-        actions = rulebased_agent.agent(observation, configuration=None)
-        return actions
-
-    def get_observation(self, game):
-        observation = None
-        return observation
-
 
 ########################################################################################################################
 # This is the Agent that you need to design for the competition

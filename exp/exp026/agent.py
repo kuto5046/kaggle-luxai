@@ -19,7 +19,10 @@ def get_game_state(observation):
     global game_state
     
     if observation["step"] == 0:
-        game_state = Game(LuxMatchConfigs_Default)
+        configs = LuxMatchConfigs_Default
+        configs["width"] = observation["width"]
+        configs["height"] = observation["height"]
+        game_state = Game(configs)
         game_state.reset(observation["updates"])
         game_state.process_updates(observation["updates"][2:])
         game_state.id = observation["player"]
