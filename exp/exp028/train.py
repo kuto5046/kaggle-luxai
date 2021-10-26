@@ -3,6 +3,7 @@ import glob
 import os
 import sys
 import random
+import traceback
 import numpy as np 
 from pathlib import Path 
 from functools import partial  # pip install functools
@@ -113,6 +114,7 @@ def main():
         entity='kuto5046', 
         config=config, 
         group=EXP_NAME, 
+        resume=is_resume,
         id = run_id,
         sync_tensorboard=True,# auto-upload sb3's tensorboard metrics
         monitor_gym=False,  # auto-upload the videos of agents playing the game
@@ -188,16 +190,18 @@ def main():
     # train
     ###########
     logger.info("Training model...")
-    if is_resume:
-        model.num_timesteps = resume_num_timesteps
-        model.learn(total_timesteps=step_count, callback=callbacks, reset_num_timesteps=False)
-    else:
-        model.learn(total_timesteps=step_count, callback=callbacks)
-        
-    if not os.path.exists(f'models/rl_model_{step_count}_steps.zip'):
+    try:
+        if is_resume:
+            model.num_timesteps = resume_num_timesteps
+            model.learn(total_timesteps=step_count, callback=callbacks, reset_num_timesteps=False)
+        else:
+            model.learn(total_timesteps=step_count, callback=callbacks)
+ 
         model.save(path=f'models/rl_model_{step_count}_steps.zip')
-    logger.info("Done training model.")
-
+        logger.info("Done training model.")
+    except:
+        model.save(path=f'models/rl_model_{model.num_timesteps}_steps.zip')
+        traceback.print_exc()
 
     #############
     # Inference 
