@@ -1,18 +1,22 @@
 basic:
   seed: 42
-  n_envs: 2
+  n_envs: 1
   n_steps: 360
   step_count: 10000000 # 100M
-  resume: True
-  pretrained_path: ./models/rl_model_49200000_steps.zip  #./models/best_model.zip
+  pretrained_path:  ./models/best_model.zip
   model_update_step_freq: 50000
+
+resume:
+  is_resume: True
+  run_id: v1
+  resume_num_timesteps: 10000000
 
 callbacks:  
   eval:
     best_model_save_path: './models/'
     # log_path: './models/'
-    eval_freq: 1600  # Run it every 5 training iterations
-    n_eval_episodes: 5  # Run 5 games
+    eval_freq: 3600  # Run it every 10 training iterations
+    n_eval_episodes: 3  # Run 5 games
     deterministic: False
     render: False
 
