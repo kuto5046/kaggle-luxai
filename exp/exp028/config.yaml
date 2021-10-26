@@ -7,9 +7,9 @@ basic:
   model_update_step_freq: 50000
 
 resume:
-  is_resume: True
-  run_id: v1
-  resume_num_timesteps: 10000000
+  is_resume: False
+  run_id: v1  # run id in wandb
+  resume_num_timesteps: 0
 
 callbacks:  
   eval:
