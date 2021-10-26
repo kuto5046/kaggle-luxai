@@ -178,40 +178,6 @@ def create_dataset_from_json(episode_dir, team_name='Toad Brigade', only_win=Fal
 
 # Input for Neural Network
 def make_input(obs, unit_id, n_obs_channel):
-    """obs情報をnnが学習しやすい形式に変換する関数
-    全て0~1に正規化されている
-    1 ch: 全部のunitの位置  
-    2 ch: 全部のunitが持つresourceの合計量(/100で正規化？)(3つまとめて良い？)  
-
-    3 ch: 自チームのworker-unitの位置 
-    4 ch: cooldownの状態(/6で正規化)
-    5 ch: resourceの合計量(/100で正規化？)(3つまとめて良い？)
-    
-    6 ch: 敵チームのworker-unitの位置 
-    7 ch: cooldownの状態(/6で正規化) (workerはmax=2/cargoはmax=3という認識)
-    8 ch: resourceの合計量(/100で正規化？)(3つまとめて良い？)
-    
-    9 ch: 自チームのcitytileの位置
-    10ch: 自チームのcitytileの夜間生存期間
-    11ch: cooldown(/10)
-    
-    12ch: 敵チームのcitytileの位置
-    13ch: 敵チームのcitytileの夜間生存期間
-    14ch: cooldown(/10)
-
-    15ch: wood量
-    16ch: coal量
-    17ch: uranium量
-    
-    18ch: 自チームのresearch point(位置情報はなし)
-    19ch: 敵チームのresearch point(位置情報はなし)
-    
-    20ch: road level
-
-    21ch: 何cycle目かを表す
-    22ch: 何step目かを表す
-    23ch: map
-    """
     width, height = obs['width'], obs['height']
 
     # mapのサイズを調整するためにshiftするマス数
@@ -257,7 +223,7 @@ def make_input(obs, unit_id, n_obs_channel):
             x = int(strs[3]) + x_shift
             y = int(strs[4]) + y_shift
             cooldown = int(strs[5])
-            idx = 8 + (team - obs['player']) % 2 * 2
+            idx = 8 + (team - obs['player']) % 2 * 3
             b[idx:idx + 3, x, y] = (
                 1,
                 cities[city_id],
@@ -408,6 +374,7 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
         if epoch_acc > best_acc:
             traced = torch.jit.trace(model.cpu(), torch.rand(1, n_obs_channel, 32, 32))
             traced.save('best.pth')
+            torch.save(model.cpu().state_dict(), '_best.pth')
             best_acc = epoch_acc
 
      
