@@ -132,50 +132,6 @@ class AgentPolicy(AgentWithModel):
         ]
         self.action_space = spaces.Discrete(max(len(self.actions_units), len(self.actions_cities)))
 
-        # Observation space: (Basic minimum for a miner agent)
-        # Object:
-        #   1x is worker
-        #   1x is cart
-        #   1x is citytile
-        #
-        #   5x direction_nearest_wood
-        #   1x distance_nearest_wood
-        #   1x amount
-        #
-        #   5x direction_nearest_coal
-        #   1x distance_nearest_coal
-        #   1x amount
-        #
-        #   5x direction_nearest_uranium
-        #   1x distance_nearest_uranium
-        #   1x amount
-        #
-        #   5x direction_nearest_city
-        #   1x distance_nearest_city
-        #   1x amount of fuel
-        #
-        #   28x (the same as above, but direction, distance, and amount to the furthest of each)
-        #
-        #   5x direction_nearest_worker
-        #   1x distance_nearest_worker
-        #   1x amount of cargo
-        # Unit:
-        #   1x cargo size
-        # State:
-        #   1x is night
-        #   1x percent of game done
-        #   2x citytile counts [cur player, opponent]
-        #   2x worker counts [cur player, opponent]
-        #   2x cart counts [cur player, opponent]
-        #   1x research points [cur player]
-        #   1x researched coal [cur player]
-        #   1x researched uranium [cur player]
-        self.observation_shape = (3 + 7 * 5 * 2 + 1 + 1 + 1 + 2 + 2 + 2 + 3,)
-        self.observation_space = spaces.Box(low=0, high=1, shape=
-        self.observation_shape, dtype=np.float16)
-
-        self.object_nodes = {}
-
     def get_agent_type(self):
         """
         Returns the type of agent. Use AGENT for inference, and LEARNING for training a model.
@@ -184,6 +140,159 @@ class AgentPolicy(AgentWithModel):
             return Constants.AGENT_TYPE.LEARNING
         else:
             return Constants.AGENT_TYPE.AGENT
+
+    def action_code_to_action(self, action_code, game, unit=None, city_tile=None, team=None):
+        """
+        Takes an action in the environment according to actionCode:
+            action_code: Index of action to take into the action array.
+        Returns: An action.
+        """
+        # Map action_code index into to a constructed Action object
+        try:
+            x = None
+            y = None
+            if city_tile is not None:
+                x = city_tile.pos.x
+                y = city_tile.pos.y
+            elif unit is not None:
+                x = unit.pos.x
+                y = unit.pos.y
+            
+            if city_tile != None:
+                action =  self.actions_cities[action_code%len(self.actions_cities)](
+                    game=game,
+                    unit_id=unit.id if unit else None,
+                    unit=unit,
+                    city_id=city_tile.city_id if city_tile else None,
+                    citytile=city_tile,
+                    team=team,
+                    x=x,
+                    y=y
+                )
+            else:
+                action =  self.actions_units[action_code%len(self.actions_units)](
+                    game=game,
+                    unit_id=unit.id if unit else None,
+                    unit=unit,
+                    city_id=city_tile.city_id if city_tile else None,
+                    citytile=city_tile,
+                    team=team,
+                    x=x,
+                    y=y
+                )
+            
+            return action
+        except Exception as e:
+            # Not a valid action
+            print(e)
+            return None
+
+    def take_action(self, action_code, game, unit=None, city_tile=None, team=None):
+        """
+        Takes an action in the environment according to actionCode:
+            actionCode: Index of action to take into the action array.
+        """
+        action = self.action_code_to_action(action_code, game, unit, city_tile, team)
+        self.match_controller.take_action(action)
+
+    def game_start(self, game):
+        """
+        This function is called at the start of each game. Use this to
+        reset and initialize per game. Note that self.team may have
+        been changed since last game. The game map has been created
+        and starting units placed.
+
+        Args:
+            game ([type]): Game.
+        """
+        self.units_last = 0
+        self.city_tiles_last = 0
+        self.fuel_collected_last = 0
+
+    def get_reward(self, game, is_game_finished, is_new_turn, is_game_error):
+        """
+        Returns the reward function for this step of the game. Reward should be a
+        delta increment to the reward, not the total current reward.
+        """
+        if is_game_error:
+            # Game environment step failed, assign a game lost reward to not incentivise this
+            print("Game failed due to error")
+            return -1.0
+
+        if not is_new_turn and not is_game_finished:
+            # Only apply rewards at the start of each turn or at game end
+            return 0
+
+        # Get some basic stats
+        unit_count = len(game.state["teamStates"][self.team]["units"])
+
+        city_count = 0
+        city_count_opponent = 0
+        city_tile_count = 0
+        city_tile_count_opponent = 0
+        for city in game.cities.values():
+            if city.team == self.team:
+                city_count += 1
+            else:
+                city_count_opponent += 1
+
+            for cell in city.city_cells:
+                if city.team == self.team:
+                    city_tile_count += 1
+                else:
+                    city_tile_count_opponent += 1
+        
+        rewards = {}
+        
+        # Give a reward for unit creation/death. 0.05 reward per unit.
+        rewards["rew/r_units"] = (unit_count - self.units_last) * 0.05
+        self.units_last = unit_count
+
+        # Give a reward for city creation/death. 0.1 reward per city.
+        rewards["rew/r_city_tiles"] = (city_tile_count - self.city_tiles_last) * 0.1
+        self.city_tiles_last = city_tile_count
+
+        # Reward collecting fuel
+        fuel_collected = game.stats["teamStats"][self.team]["fuelGenerated"]
+        rewards["rew/r_fuel_collected"] = ( (fuel_collected - self.fuel_collected_last) / 20000 )
+        self.fuel_collected_last = fuel_collected
+        
+        # Give a reward of 1.0 per city tile alive at the end of the game
+        rewards["rew/r_city_tiles_end"] = 0
+        if is_game_finished:
+            self.is_last_turn = True
+            rewards["rew/r_city_tiles_end"] = city_tile_count - city_tile_count_opponent
+
+            # Example of a game win/loss reward instead
+            # if game.get_winning_team() == self.team:
+            #     rewards["rew/r_game_win"] = 100.0 # Win
+            # else:
+            #     rewards["rew/r_game_win"] = -100.0 # Loss
+        
+        reward = 0
+        for name, value in rewards.items():
+            reward += value
+
+        return reward
+
+    def turn_heurstics(self, game, is_first_turn):
+        """
+        This is called pre-observation actions to allow for hardcoded heuristics
+        to control a subset of units. Any unit or city that gets an action from this
+        callback, will not create an observation+action.
+
+        Args:
+            game ([type]): Game in progress
+            is_first_turn (bool): True if it's the first turn of a game.
+        """
+        return
+    
+
+class MlpAgentPolicy(AgentPolicy):
+
+    def __init__(self):
+        self.observation_shape = (3 + 7 * 5 * 2 + 1 + 1 + 1 + 2 + 2 + 2 + 3,)
+        self.observation_space = spaces.Box(low=0, high=1, shape=self.observation_shape, dtype=np.float16)
 
     def get_observation(self, game, unit, city_tile, team, is_new_turn):
         """
@@ -423,152 +532,159 @@ class AgentPolicy(AgentWithModel):
 
         return obs
 
-    def action_code_to_action(self, action_code, game, unit=None, city_tile=None, team=None):
-        """
-        Takes an action in the environment according to actionCode:
-            action_code: Index of action to take into the action array.
-        Returns: An action.
-        """
-        # Map action_code index into to a constructed Action object
-        try:
-            x = None
-            y = None
-            if city_tile is not None:
-                x = city_tile.pos.x
-                y = city_tile.pos.y
-            elif unit is not None:
-                x = unit.pos.x
-                y = unit.pos.y
-            
-            if city_tile != None:
-                action =  self.actions_cities[action_code%len(self.actions_cities)](
-                    game=game,
-                    unit_id=unit.id if unit else None,
-                    unit=unit,
-                    city_id=city_tile.city_id if city_tile else None,
-                    citytile=city_tile,
-                    team=team,
-                    x=x,
-                    y=y
-                )
-            else:
-                action =  self.actions_units[action_code%len(self.actions_units)](
-                    game=game,
-                    unit_id=unit.id if unit else None,
-                    unit=unit,
-                    city_id=city_tile.city_id if city_tile else None,
-                    citytile=city_tile,
-                    team=team,
-                    x=x,
-                    y=y
-                )
-            
-            return action
-        except Exception as e:
-            # Not a valid action
-            print(e)
-            return None
 
-    def take_action(self, action_code, game, unit=None, city_tile=None, team=None):
-        """
-        Takes an action in the environment according to actionCode:
-            actionCode: Index of action to take into the action array.
-        """
-        action = self.action_code_to_action(action_code, game, unit, city_tile, team)
-        self.match_controller.take_action(action)
+class CnnAgentPolicy(AgentPolicy):
+    def __init__(self):
+        self.n_obs_channel = 32
+        self.observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
 
-    def game_start(self, game):
+    def get_observation(self, game, unit, city_tile, team, is_new_turn):
         """
-        This function is called at the start of each game. Use this to
-        reset and initialize per game. Note that self.team may have
-        been changed since last game. The game map has been created
-        and starting units placed.
-
-        Args:
-            game ([type]): Game.
+         Implements getting a observation from the current game for this unit or city
+         0ch: target unit(worker) pos
+         1ch: target unit(worker) resource
+         2ch: target unit(cart) pos
+         3ch: target unit(cart) pos
+         4ch: own unit(worker) pos
+         5ch: own unit(worker) cooldown
+         6ch: own unit(worker) resource
+         7ch: own unit(cart) pos
+         8ch: own unit(cart) cooldown
+         9ch: own unit(cart) resource
+        10ch: opponent unit(worker) pos
+        11ch: opponent unit(worker) cooldown
+        12ch: opponent unit(worker) resource
+        13ch: opponent unit(cart) pos
+        14ch: opponent unit(cart) cooldown
+        15ch: opponent unit(cart) resource
+        16ch: target citytile pos
+        17ch: target citytile fuel_ratio
+        18ch: own citytile pos
+        19ch: own citytile fuel_ratio
+        20ch: own citytile cooldown
+        21ch: opponent citytile pos
+        22ch: opponent citytile fuel_ratio
+        23ch: opponent citytile cooldown
+        24ch: wood
+        25ch: coal
+        26ch: uranium
+        27ch: own research points
+        28ch: opponent research points
+        29ch: road level
+        30ch: cycle
+        31ch: turn 
+        32ch: map
         """
-        self.units_last = 0
-        self.city_tiles_last = 0
-        self.fuel_collected_last = 0
 
-    def get_reward(self, game, is_game_finished, is_new_turn, is_game_error):
-        """
-        Returns the reward function for this step of the game. Reward should be a
-        delta increment to the reward, not the total current reward.
-        """
-        if is_game_error:
-            # Game environment step failed, assign a game lost reward to not incentivise this
-            print("Game failed due to error")
-            return -1.0
+        height = game.map.height
+        width = game.map.width
 
-        if not is_new_turn and not is_game_finished:
-            # Only apply rewards at the start of each turn or at game end
-            return 0
+        x_shift = (32 - width) // 2
+        y_shift = (32 - height) // 2
 
-        # Get some basic stats
-        unit_count = len(game.state["teamStates"][self.team]["units"])
+        b = np.zeros((self.n_obs_channel, 32, 32), dtype=np.float32)
+        opponent_team = 1 - team
+        # target unit
+        if unit is not None:
+            if unit.type == Constants.UNIT_TYPES.WORKER:
+                x = unit.pos.x + x_shift
+                y = unit.pos.y + y_shift
+                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"]
+                resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
+                b[:2, x,y] = (1, resource)
+            elif unit.type == Constants.UNIT_TYPES.CART:
+                x = unit.pos.x + x_shift
+                y = unit.pos.y + y_shift 
+                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
+                resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
+                b[2:4, x,y] = (1, resource) 
+    
 
-        city_count = 0
-        city_count_opponent = 0
-        city_tile_count = 0
-        city_tile_count_opponent = 0
+        # unit
+        for _unit in game.state["teamStates"][team]["units"].values():
+            if _unit.id == unit.id:
+                continue
+            x = _unit.pos.x + x_shift
+            y = _unit.pos.y + y_shift
+            if _unit.type == Constants.UNIT_TYPES.WORKER:
+                cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
+                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"] 
+                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
+                b[4:7, x,y] = (1, cooldown, resource)
+            elif _unit.type == Constants.UNIT_TYPES.CART:
+                cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
+                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
+                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
+                b[7:10, x,y] = (1, cooldown, resource)   
+        
+        for _unit in game.state["teamStates"][opponent_team]["units"].values():
+            x = _unit.pos.x + x_shift
+            y = _unit.pos.y + y_shift
+            if _unit.type == Constants.UNIT_TYPES.WORKER:
+                cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
+                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"] 
+                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
+                b[10:13, x,y] = (1, cooldown, resource)
+            elif _unit.type == Constants.UNIT_TYPES.CART:
+                cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
+                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
+                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
+                b[13:16, x,y] = (1, cooldown, resource)  
+        
+        # city tile
         for city in game.cities.values():
-            if city.team == self.team:
-                city_count += 1
-            else:
-                city_count_opponent += 1
-
+            fuel = city.fuel
+            lightupkeep = city.get_light_upkeep()
+            max_cooldown = GAME_CONSTANTS["PARAMETERS"]["CITY_ACTION_COOLDOWN"]
+            fuel_ratio = min(fuel / lightupkeep, max_cooldown) / max_cooldown
             for cell in city.city_cells:
-                if city.team == self.team:
-                    city_tile_count += 1
+                x = cell.pos.x + x_shift
+                y = cell.pos.y + y_shift
+                cooldown = cell.city_tile.cooldown / max_cooldown
+
+                # target city_tile
+                if (cell.city_tile.pos.x == city_tile.pos.x)&(cell.city_tile.pos.y == city_tile.pos.y):
+                    b[16:18, x, y] = (1, fuel_ratio)
                 else:
-                    city_tile_count_opponent += 1
+                    if city.team == team:
+                        b[18:21, x, y] = (1, fuel_ratio, cooldown)
+                    else:
+                        b[21:24, x, y] = (1, fuel_ratio, cooldown)
         
-        rewards = {}
+        # resource
+        resource_dict = {'wood': 24, 'coal': 25, 'uranium': 26}
+        for cell in game.map.resources:
+            x = cell.pos.x + x_shift
+            y = cell.pos.y + y_shift
+            r_type = cell.resource.type
+            amount = cell.resource.amount / 800
+            idx = resource_dict[r_type]
+            b[idx, x, y] = amount
         
-        # Give a reward for unit creation/death. 0.05 reward per unit.
-        rewards["rew/r_units"] = (unit_count - self.units_last) * 0.05
-        self.units_last = unit_count
-
-        # Give a reward for city creation/death. 0.1 reward per city.
-        rewards["rew/r_city_tiles"] = (city_tile_count - self.city_tiles_last) * 0.1
-        self.city_tiles_last = city_tile_count
-
-        # Reward collecting fuel
-        fuel_collected = game.stats["teamStats"][self.team]["fuelGenerated"]
-        rewards["rew/r_fuel_collected"] = ( (fuel_collected - self.fuel_collected_last) / 20000 )
-        self.fuel_collected_last = fuel_collected
+        # research points
+        max_rp = GAME_CONSTANTS["PARAMETERS"]["RESEARCH_REQUIREMENTS"]["URANIUM"]
+        b[27, :] = min(game.state["teamStates"][team]["researchPoints"], max_rp) / max_rp
+        b[28, :] = min(game.state["teamStates"][opponent_team]["researchPoints"], max_rp) / max_rp
         
-        # Give a reward of 1.0 per city tile alive at the end of the game
-        rewards["rew/r_city_tiles_end"] = 0
-        if is_game_finished:
-            self.is_last_turn = True
-            rewards["rew/r_city_tiles_end"] = city_tile_count - city_tile_count_opponent
+        # road
+        for row in game.map.map:
+            for cell in row:
+                if cell.road > 0:
+                    x = cell.pos.x + x_shift
+                    y = cell.pos.y + y_shift
+                    b[29, x,y] = cell.road / 6
 
-            # Example of a game win/loss reward instead
-            # if game.get_winning_team() == self.team:
-            #     rewards["rew/r_game_win"] = 100.0 # Win
-            # else:
-            #     rewards["rew/r_game_win"] = -100.0 # Loss
+
+        # cycle
+        cycle = GAME_CONSTANTS["PARAMETERS"]["DAY_LENGTH"] + GAME_CONSTANTS["PARAMETERS"]["NIGHT_LENGTH"]
+        b[30, :] = game.state["turn"] % cycle / cycle
+        b[31, :] = game.state["turn"] / GAME_CONSTANTS["PARAMETERS"]["MAX_DAYS"]
         
-        reward = 0
-        for name, value in rewards.items():
-            reward += value
+        # map
+        b[32, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
 
-        return reward
-
-    def turn_heurstics(self, game, is_first_turn):
-        """
-        This is called pre-observation actions to allow for hardcoded heuristics
-        to control a subset of units. Any unit or city that gets an action from this
-        callback, will not create an observation+action.
-
-        Args:
-            game ([type]): Game in progress
-            is_first_turn (bool): True if it's the first turn of a game.
-        """
-        return
+        assert np.sum(b > 1) == 0
+        return b 
     
 
-    
 

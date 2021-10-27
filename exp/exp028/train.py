@@ -19,6 +19,7 @@ from stable_baselines3.common.utils import set_random_seed, get_schedule_fn, get
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from wandb.integration.sb3 import WandbCallback
 
+sys.path.append("../../LuxPythonEnvGym")
 from agent_policy import AgentPolicy
 from agents.imitation.agent_policy import ImitationAgent
 from agents.random.agent_policy import RandomAgent
@@ -203,10 +204,6 @@ def main():
         model.save(path=f'models/rl_model_{model.num_timesteps}_steps.zip')
         traceback.print_exc()
 
-    #############
-    # Inference 
-    #############
-    # kaggleのreplayをself-playで残したい
     run.finish()
 
 
