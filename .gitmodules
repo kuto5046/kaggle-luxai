@@ -1,0 +1,3 @@
+[submodule "LuxPythonEnvGym"]
+	path = LuxPythonEnvGym
+	url = https://github.com/kuto5046/LuxPythonEnvGym
