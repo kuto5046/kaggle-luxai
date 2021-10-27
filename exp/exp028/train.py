@@ -17,17 +17,19 @@ from stable_baselines3 import PPO  # pip install stable-baselines3
 from stable_baselines3.common.callbacks import CallbackList, EvalCallback, CheckpointCallback
 from stable_baselines3.common.utils import set_random_seed, get_schedule_fn, get_device
 from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.logger import Logger, configure
 from wandb.integration.sb3 import WandbCallback
 
-sys.path.append("../../LuxPythonEnvGym")
 from agent_policy import AgentPolicy
+sys.path.append("../../")
 from agents.imitation.agent_policy import ImitationAgent
 from agents.random.agent_policy import RandomAgent
+
+sys.path.append("../../LuxPythonEnvGym")
 from luxai2021.env.agent import Agent
 from luxai2021.env.lux_env import LuxEnvironment, SaveReplayAndModelCallback
 from luxai2021.game.constants import LuxMatchConfigs_Default
-from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.logger import Logger, configure
 from luxai2021.game.game import Game
 
 
@@ -95,7 +97,9 @@ def main():
     n_envs = config["basic"]["n_envs"]
     step_count = config["basic"]["step_count"]
     pretrained_path = config["basic"]["pretrained_path"]
-    model_update_step_freq = config["basic"]["model_update_step_freq"]
+
+    model_update_step_freq = config["model"]["model_update_step_freq"]
+    model_arche = config["model"]["model_arche"]
 
     is_resume = config['resume']['is_resume']
     resume_num_timesteps = config['resume']['resume_num_timesteps']
@@ -103,7 +107,7 @@ def main():
 
     ckpt_params = config['callbacks']['checkpoints']
     eval_params = config['callbacks']['eval']
-    model_params = config["model"]
+    model_params = config["model"]["params"]
     seed_everything(seed)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     
@@ -138,9 +142,9 @@ def main():
         old_model = PPO.load(pretrained_path, device="cpu")
 
         # Create a default opponent agent and a RL agent in training mode
-        opponents["self-play"] = AgentPolicy(mode="inference", model=old_model)
+        opponents["self-play"] = AgentPolicy(mode="inference", arche=model_arche, model=old_model)
 
-        player = AgentPolicy(mode="train", model=old_model)
+        player = AgentPolicy(mode="train", arche=model_arche, model=old_model)
         # environmnet
         if n_envs == 1:
             env = LuxEnvironment(configs=configs,
@@ -149,25 +153,30 @@ def main():
                                 model_update_step_freq=model_update_step_freq)
         else:
             env = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
-                                                            learning_agent=AgentPolicy(mode="train", model=old_model),
+                                                            learning_agent=AgentPolicy(mode="train", arche=model_arche, model=old_model),
                                                             opponent_agents=opponents,
                                                             model_update_step_freq=model_update_step_freq), i) for i in range(n_envs)])
     else:
-        opponents["self-play"] = AgentPolicy(mode="inference")
-        player = AgentPolicy(mode="train")
+        opponents["self-play"] = AgentPolicy(mode="inference", arche=model_arche)
+        player = AgentPolicy(mode="train", arche=model_arche)
         #  environmnet
         if n_envs == 1:
             env = LuxEnvironment(configs=configs,
                                 learning_agent=player,
                                 opponent_agents=opponents, 
+                                initial_opponent_policy="random",
                                 model_update_step_freq=model_update_step_freq)
         else:
             env = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
-                                                            learning_agent=AgentPolicy(mode="train"),
+                                                            learning_agent=AgentPolicy(mode="train", arche=model_arche),
                                                             opponent_agents=opponents,
+                                                            initial_opponent_policy="random",
                                                             model_update_step_freq=model_update_step_freq), i) for i in range(n_envs)])
         
-    model = PPO("MlpPolicy", env, **model_params)
+    if model_arche == "mlp":
+        model = PPO("MlpPolicy", env, **model_params)
+    elif model_arche == "cnn":
+        model = PPO("CnnPolicy", env, **model_params)
 
     #############
     #  callback
@@ -183,7 +192,7 @@ def main():
         # An evaluation environment is needed to measure multi-env setups. Use a fixed 4 envs.
         opponents = {"imitation": ImitationAgent()}
         env_eval = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
-                                                     learning_agent=AgentPolicy(mode="train"),
+                                                     learning_agent=AgentPolicy(mode="train", arche=model_arche),
                                                      opponent_agents=opponents), i) for i in range(1)])
         callbacks.append(EvalCallback(env_eval, **eval_params))
 
@@ -199,9 +208,10 @@ def main():
             model.learn(total_timesteps=step_count, callback=callbacks)
  
         model.save(path=f'models/rl_model_{step_count}_steps.zip')
-        logger.info("Done training model.")
+        logger.info(f"Done training model.  this: {step_count}(steps), total: {model.num_timesteps}(steps)")
     except:
         model.save(path=f'models/rl_model_{model.num_timesteps}_steps.zip')
+        logger.info(f"There are something errors. Finish training model. total: {model.num_timesteps}(steps)")
         traceback.print_exc()
 
     run.finish()

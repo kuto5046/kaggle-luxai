@@ -7,6 +7,7 @@ import random
 import numpy as np
 from gym import spaces
 
+sys.path.append("../../LuxPythonEnvGym")
 from luxai2021.env.agent import Agent, AgentWithModel
 from luxai2021.game.actions import *
 from luxai2021.game.game_constants import GAME_CONSTANTS
@@ -103,7 +104,7 @@ def smart_transfer_to_nearby(game, team, unit_id, unit, target_type_restriction=
 # This is the Agent that you need to design for the competition
 ########################################################################################################################
 class AgentPolicy(AgentWithModel):
-    def __init__(self, mode="train", model=None) -> None:
+    def __init__(self, mode="train", arche="mlp", model=None) -> None:
         """
         Arguments:
             mode: "train" or "inference", which controls if this agent is for training or not.
@@ -131,6 +132,16 @@ class AgentPolicy(AgentWithModel):
             ResearchAction,
         ]
         self.action_space = spaces.Discrete(max(len(self.actions_units), len(self.actions_cities)))
+
+        self.arche = arche
+        if arche == "mlp":
+            self.observation_shape = (3 + 7 * 5 * 2 + 1 + 1 + 1 + 2 + 2 + 2 + 3,)
+            self.observation_space = spaces.Box(low=0, high=1, shape=self.observation_shape, dtype=np.float16)
+        elif arche == "cnn":
+            self.n_obs_channel = 32
+            self.observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
+        
+        self.object_nodes = {}
 
     def get_agent_type(self):
         """
@@ -209,92 +220,13 @@ class AgentPolicy(AgentWithModel):
         self.city_tiles_last = 0
         self.fuel_collected_last = 0
 
-    def get_reward(self, game, is_game_finished, is_new_turn, is_game_error):
-        """
-        Returns the reward function for this step of the game. Reward should be a
-        delta increment to the reward, not the total current reward.
-        """
-        if is_game_error:
-            # Game environment step failed, assign a game lost reward to not incentivise this
-            print("Game failed due to error")
-            return -1.0
-
-        if not is_new_turn and not is_game_finished:
-            # Only apply rewards at the start of each turn or at game end
-            return 0
-
-        # Get some basic stats
-        unit_count = len(game.state["teamStates"][self.team]["units"])
-
-        city_count = 0
-        city_count_opponent = 0
-        city_tile_count = 0
-        city_tile_count_opponent = 0
-        for city in game.cities.values():
-            if city.team == self.team:
-                city_count += 1
-            else:
-                city_count_opponent += 1
-
-            for cell in city.city_cells:
-                if city.team == self.team:
-                    city_tile_count += 1
-                else:
-                    city_tile_count_opponent += 1
-        
-        rewards = {}
-        
-        # Give a reward for unit creation/death. 0.05 reward per unit.
-        rewards["rew/r_units"] = (unit_count - self.units_last) * 0.05
-        self.units_last = unit_count
-
-        # Give a reward for city creation/death. 0.1 reward per city.
-        rewards["rew/r_city_tiles"] = (city_tile_count - self.city_tiles_last) * 0.1
-        self.city_tiles_last = city_tile_count
-
-        # Reward collecting fuel
-        fuel_collected = game.stats["teamStats"][self.team]["fuelGenerated"]
-        rewards["rew/r_fuel_collected"] = ( (fuel_collected - self.fuel_collected_last) / 20000 )
-        self.fuel_collected_last = fuel_collected
-        
-        # Give a reward of 1.0 per city tile alive at the end of the game
-        rewards["rew/r_city_tiles_end"] = 0
-        if is_game_finished:
-            self.is_last_turn = True
-            rewards["rew/r_city_tiles_end"] = city_tile_count - city_tile_count_opponent
-
-            # Example of a game win/loss reward instead
-            # if game.get_winning_team() == self.team:
-            #     rewards["rew/r_game_win"] = 100.0 # Win
-            # else:
-            #     rewards["rew/r_game_win"] = -100.0 # Loss
-        
-        reward = 0
-        for name, value in rewards.items():
-            reward += value
-
-        return reward
-
-    def turn_heurstics(self, game, is_first_turn):
-        """
-        This is called pre-observation actions to allow for hardcoded heuristics
-        to control a subset of units. Any unit or city that gets an action from this
-        callback, will not create an observation+action.
-
-        Args:
-            game ([type]): Game in progress
-            is_first_turn (bool): True if it's the first turn of a game.
-        """
-        return
-    
-
-class MlpAgentPolicy(AgentPolicy):
-
-    def __init__(self):
-        self.observation_shape = (3 + 7 * 5 * 2 + 1 + 1 + 1 + 2 + 2 + 2 + 3,)
-        self.observation_space = spaces.Box(low=0, high=1, shape=self.observation_shape, dtype=np.float16)
-
     def get_observation(self, game, unit, city_tile, team, is_new_turn):
+        if self.arche == "mlp":
+            return self.get_mlp_observation(game, unit, city_tile, team, is_new_turn)
+        elif self.arche == "cnn":
+            return self.get_cnn_observation(game, unit, city_tile, team, is_new_turn)
+
+    def get_mlp_observation(self, game, unit, city_tile, team, is_new_turn):
         """
         Implements getting a observation from the current game for this unit or city
         """
@@ -532,13 +464,7 @@ class MlpAgentPolicy(AgentPolicy):
 
         return obs
 
-
-class CnnAgentPolicy(AgentPolicy):
-    def __init__(self):
-        self.n_obs_channel = 32
-        self.observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
-
-    def get_observation(self, game, unit, city_tile, team, is_new_turn):
+    def get_cnn_observation(self, game, unit, city_tile, team, is_new_turn):
         """
          Implements getting a observation from the current game for this unit or city
          0ch: target unit(worker) pos
@@ -686,5 +612,81 @@ class CnnAgentPolicy(AgentPolicy):
         assert np.sum(b > 1) == 0
         return b 
     
+    def get_reward(self, game, is_game_finished, is_new_turn, is_game_error):
+        """
+        Returns the reward function for this step of the game. Reward should be a
+        delta increment to the reward, not the total current reward.
+        """
+        if is_game_error:
+            # Game environment step failed, assign a game lost reward to not incentivise this
+            print("Game failed due to error")
+            return -1.0
 
+        if not is_new_turn and not is_game_finished:
+            # Only apply rewards at the start of each turn or at game end
+            return 0
 
+        # Get some basic stats
+        unit_count = len(game.state["teamStates"][self.team]["units"])
+
+        city_count = 0
+        city_count_opponent = 0
+        city_tile_count = 0
+        city_tile_count_opponent = 0
+        for city in game.cities.values():
+            if city.team == self.team:
+                city_count += 1
+            else:
+                city_count_opponent += 1
+
+            for cell in city.city_cells:
+                if city.team == self.team:
+                    city_tile_count += 1
+                else:
+                    city_tile_count_opponent += 1
+        
+        rewards = {}
+        
+        # Give a reward for unit creation/death. 0.05 reward per unit.
+        rewards["rew/r_units"] = (unit_count - self.units_last) * 0.05
+        self.units_last = unit_count
+
+        # Give a reward for city creation/death. 0.1 reward per city.
+        rewards["rew/r_city_tiles"] = (city_tile_count - self.city_tiles_last) * 0.1
+        self.city_tiles_last = city_tile_count
+
+        # Reward collecting fuel
+        fuel_collected = game.stats["teamStats"][self.team]["fuelGenerated"]
+        rewards["rew/r_fuel_collected"] = ( (fuel_collected - self.fuel_collected_last) / 20000 )
+        self.fuel_collected_last = fuel_collected
+        
+        # Give a reward of 1.0 per city tile alive at the end of the game
+        rewards["rew/r_city_tiles_end"] = 0
+        if is_game_finished:
+            self.is_last_turn = True
+            rewards["rew/r_city_tiles_end"] = city_tile_count - city_tile_count_opponent
+
+            # Example of a game win/loss reward instead
+            # if game.get_winning_team() == self.team:
+            #     rewards["rew/r_game_win"] = 100.0 # Win
+            # else:
+            #     rewards["rew/r_game_win"] = -100.0 # Loss
+        
+        reward = 0
+        for name, value in rewards.items():
+            reward += value
+
+        return reward
+
+    def turn_heurstics(self, game, is_first_turn):
+        """
+        This is called pre-observation actions to allow for hardcoded heuristics
+        to control a subset of units. Any unit or city that gets an action from this
+        callback, will not create an observation+action.
+
+        Args:
+            game ([type]): Game in progress
+            is_first_turn (bool): True if it's the first turn of a game.
+        """
+        return
+    
