@@ -138,7 +138,7 @@ class AgentPolicy(AgentWithModel):
             self.observation_shape = (3 + 7 * 5 * 2 + 1 + 1 + 1 + 2 + 2 + 2 + 3,)
             self.observation_space = spaces.Box(low=0, high=1, shape=self.observation_shape, dtype=np.float16)
         elif arche == "cnn":
-            self.n_obs_channel = 32
+            self.n_obs_channel = 33
             self.observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
         
         self.object_nodes = {}
@@ -512,33 +512,34 @@ class AgentPolicy(AgentWithModel):
         opponent_team = 1 - team
         # target unit
         if unit is not None:
+            x = unit.pos.x + x_shift
+            y = unit.pos.y + y_shift
             if unit.type == Constants.UNIT_TYPES.WORKER:
-                x = unit.pos.x + x_shift
-                y = unit.pos.y + y_shift
                 cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"]
                 resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
                 b[:2, x,y] = (1, resource)
             elif unit.type == Constants.UNIT_TYPES.CART:
-                x = unit.pos.x + x_shift
-                y = unit.pos.y + y_shift 
                 cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
                 resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
                 b[2:4, x,y] = (1, resource) 
-    
 
         # unit
         for _unit in game.state["teamStates"][team]["units"].values():
-            if _unit.id == unit.id:
-                continue
+            if unit is not None:
+                if _unit.id == unit.id:
+                    continue
+
             x = _unit.pos.x + x_shift
             y = _unit.pos.y + y_shift
             if _unit.type == Constants.UNIT_TYPES.WORKER:
-                cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
-                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"] 
+                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
+                cooldown = _unit.cooldown / 6  # TODO なぜか1を超えてしまう
+                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"]
                 resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
                 b[4:7, x,y] = (1, cooldown, resource)
             elif _unit.type == Constants.UNIT_TYPES.CART:
-                cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
+                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
+                cooldonw = _unit.cooldown / 6
                 cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
                 resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
                 b[7:10, x,y] = (1, cooldown, resource)   
@@ -547,12 +548,14 @@ class AgentPolicy(AgentWithModel):
             x = _unit.pos.x + x_shift
             y = _unit.pos.y + y_shift
             if _unit.type == Constants.UNIT_TYPES.WORKER:
-                cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
+                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
+                cooldown = _unit.cooldown / 6
                 cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"] 
                 resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
                 b[10:13, x,y] = (1, cooldown, resource)
             elif _unit.type == Constants.UNIT_TYPES.CART:
-                cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
+                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
+                cooldown = _unit.cooldown / 6
                 cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
                 resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
                 b[13:16, x,y] = (1, cooldown, resource)  
@@ -569,13 +572,15 @@ class AgentPolicy(AgentWithModel):
                 cooldown = cell.city_tile.cooldown / max_cooldown
 
                 # target city_tile
-                if (cell.city_tile.pos.x == city_tile.pos.x)&(cell.city_tile.pos.y == city_tile.pos.y):
-                    b[16:18, x, y] = (1, fuel_ratio)
+                if city_tile is not None:
+                    if (cell.city_tile.pos.x == city_tile.pos.x)&(cell.city_tile.pos.y == city_tile.pos.y):
+                        b[16:18, x, y] = (1, fuel_ratio)
+                        continue
+                
+                if city.team == team:
+                    b[18:21, x, y] = (1, fuel_ratio, cooldown)
                 else:
-                    if city.team == team:
-                        b[18:21, x, y] = (1, fuel_ratio, cooldown)
-                    else:
-                        b[21:24, x, y] = (1, fuel_ratio, cooldown)
+                    b[21:24, x, y] = (1, fuel_ratio, cooldown)
         
         # resource
         resource_dict = {'wood': 24, 'coal': 25, 'uranium': 26}

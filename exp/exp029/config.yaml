@@ -2,13 +2,13 @@ basic:
   seed: 42
   n_envs: 24
   n_steps: 360
-  step_count: 10000000 # 10M
-  pretrained_path:  ./models/rl_model_32174400_steps.zip  # best_model.zip
+  step_count: 50000000 # 50M
+  pretrained_path: best_model.zip
 
 resume:
-  is_resume: True
+  is_resume: False
   run_id: devout-totem-367  # run id in wandb
-  resume_num_timesteps: 32174400
+  resume_num_timesteps: 0
 
 callbacks:  
   eval:
@@ -27,7 +27,7 @@ callbacks:
 
 model:
     model_update_step_freq: 50000
-    model_arche: "mlp"  # "cnn" or "mlp"
+    model_arche: "cnn"  # "cnn" or "mlp"
     params:
       verbose: 0
       tensorboard_log: "./tensorboard/"
