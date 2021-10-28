@@ -1,5 +1,8 @@
 from stable_baselines3 import PPO  # pip install stable-baselines3
 
+
+import sys
+sys.path.append("../../LuxPythonEnvGym/")
 from luxai2021.env.agent import AgentFromStdInOut
 from luxai2021.env.lux_env import LuxEnvironment
 from luxai2021.game.constants import LuxMatchConfigs_Default
@@ -11,7 +14,7 @@ models = glob.glob(f'./models/rl_model_*_steps.zip')
 pretrained_model = sorted(models, key=lambda x: int(x.split('_')[-2]), reverse=True)[0]
 print(pretrained_model)
 model = PPO.load(pretrained_model)
-_agent = AgentPolicy(mode="inference", model=model)
+_agent = AgentPolicy(mode="inference", arche="mlp", model=model)
 
 
 game_state = None

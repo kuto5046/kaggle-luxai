@@ -11,7 +11,9 @@ from luxai2021.env.agent import Agent, AgentWithModel
 from luxai2021.game.actions import *
 from luxai2021.game.game_constants import GAME_CONSTANTS
 from luxai2021.game.position import Position
-
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+import torch.nn as nn
+import torch.nn.functional as F
 
 # https://codereview.stackexchange.com/questions/28207/finding-the-closest-point-to-a-list-of-points
 def closest_node(node, nodes):
@@ -98,6 +100,48 @@ def smart_transfer_to_nearby(game, team, unit_id, unit, target_type_restriction=
             resource_amount = target_unit.get_cargo_space_left()
     
     return TransferAction(team, unit_id, target_unit_id, resource_type, resource_amount)
+
+
+# Neural Network for Lux AI
+class BasicConv2d(nn.Module):
+    def __init__(self, input_dim, output_dim, kernel_size, bn):
+        super().__init__()
+        self.conv = nn.Conv2d(
+            input_dim, output_dim, 
+            kernel_size=kernel_size, 
+            padding=(kernel_size[0] // 2, kernel_size[1] // 2)
+        )
+        self.bn = nn.BatchNorm2d(output_dim) if bn else None
+
+    def forward(self, x):
+        h = self.conv(x)
+        h = self.bn(h) if self.bn is not None else h
+        return h
+
+    
+class LuxNet(BaseFeaturesExtractor):
+    def __init__(self, observation_space, features_dim):
+        super(LuxNet, self).__init__(observation_space, features_dim)
+        layers, filters = 6, 32
+        n_obs_channel = observation_space.shape[0]
+        self.conv0 = BasicConv2d(n_obs_channel, filters, (3, 3), False)
+        self.num_actions = features_dim
+        self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
+
+        self.head_p = nn.Linear(filters, self.num_actions, bias=False)
+        # self.head_v = nn.Linear(filters*2, 1, bias=False)  # for value(reward)
+
+    def forward(self, x):
+        h = F.relu_(self.conv0(x))
+        for block in self.blocks:
+            h = F.relu_(h + block(h))
+        # h = (batch, c, w, h) -> (batch, c) 
+        # h:(64,32,32,32)
+        h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # h=head: (64, 32)
+        # h_avg = h.view(h.size(0), h.size(1), -1).mean(-1)  # h_avg: (64, 32)
+        p = self.head_p(h_head)  # policy
+        # v = torch.tanh(self.head_v(torch.cat([h_head, h_avg], dim=1)))  # value
+        return p # , v.squeeze(dim=1)
 
 ########################################################################################################################
 # This is the Agent that you need to design for the competition
@@ -220,6 +264,54 @@ class AgentPolicy(AgentWithModel):
         self.fuel_collected_last = 0
         self.research_points_last = 0
 
+
+    def process_turn(self, game, team):
+        """
+        Decides on a set of actions for the current turn. Not used in training, only inference. Generally
+        don't modify this part of the code.
+        Returns: Array of actions to perform.
+        """
+        start_time = time.time()
+        actions = []
+        new_turn = True
+        base_obs = self.get_base_cnn_observation(game, team)
+        # Inference the model per-unit
+        units = game.state["teamStates"][team]["units"].values()
+        for unit in units:
+            if unit.can_act():
+                obs = self.get_target_cnn_observation(game, base_obs, unit, None, unit.team, new_turn)
+                # IMPORTANT: You can change deterministic=True to disable randomness in model inference. Generally,
+                # I've found the agents get stuck sometimes if they are fully deterministic.
+                action_code, _states = self.model.predict(obs, deterministic=False)
+                if action_code is not None:
+                    actions.append(
+                        self.action_code_to_action(action_code, game=game, unit=unit, city_tile=None, team=unit.team))
+                new_turn = False
+
+        # Inference the model per-city
+        cities = game.cities.values()
+        for city in cities:
+            if city.team == team:
+                for cell in city.city_cells:
+                    city_tile = cell.city_tile
+                    if city_tile.can_act():
+                        obs = self.get_target_cnn_observation(game, base_obs, None, city_tile, city.team, new_turn)
+                        # IMPORTANT: You can change deterministic=True to disable randomness in model inference. Generally,
+                        # I've found the agents get stuck sometimes if they are fully deterministic.
+                        action_code, _states = self.model.predict(obs, deterministic=False)
+                        if action_code is not None:
+                            actions.append(
+                                self.action_code_to_action(action_code, game=game, unit=None, city_tile=city_tile,
+                                                           team=city.team))
+                        new_turn = False
+
+        time_taken = time.time() - start_time
+        if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
+            print("WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
+                  file=sys.stderr)
+
+        return actions
+    
     def get_observation(self, game, unit, city_tile, team, is_new_turn):
         if self.arche == "mlp":
             return self.get_mlp_observation(game, unit, city_tile, team, is_new_turn)
@@ -616,7 +708,240 @@ class AgentPolicy(AgentWithModel):
 
         assert np.sum(b > 1) == 0
         return b 
+
+    def get_target_cnn_observation(self, game, base_obs, unit, city_tile, team):
+        """
+         Implements getting a observation from the current game for this unit or city
+         0ch: target unit(worker) pos
+         1ch: target unit(worker) resource
+         2ch: target unit(cart) pos
+         3ch: target unit(cart) pos
+         4ch: own unit(worker) pos
+         5ch: own unit(worker) cooldown
+         6ch: own unit(worker) resource
+         7ch: own unit(cart) pos
+         8ch: own unit(cart) cooldown
+         9ch: own unit(cart) resource
+        10ch: opponent unit(worker) pos
+        11ch: opponent unit(worker) cooldown
+        12ch: opponent unit(worker) resource
+        13ch: opponent unit(cart) pos
+        14ch: opponent unit(cart) cooldown
+        15ch: opponent unit(cart) resource
+        16ch: target citytile pos
+        17ch: target citytile fuel_ratio
+        18ch: own citytile pos
+        19ch: own citytile fuel_ratio
+        20ch: own citytile cooldown
+        21ch: opponent citytile pos
+        22ch: opponent citytile fuel_ratio
+        23ch: opponent citytile cooldown
+        24ch: wood
+        25ch: coal
+        26ch: uranium
+        27ch: own research points
+        28ch: opponent research points
+        29ch: road level
+        30ch: cycle
+        31ch: turn 
+        32ch: map
+        """
+
+        height = game.map.height
+        width = game.map.width
+
+        x_shift = (32 - width) // 2
+        y_shift = (32 - height) // 2
+
+        b = base_obs.copy()
+
+        # target unit
+        if unit is not None:
+            x = unit.pos.x + x_shift
+            y = unit.pos.y + y_shift
+            if unit.type == Constants.UNIT_TYPES.WORKER:
+                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"]
+                resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
+                b[:2, x,y] = (1, resource)
+                b[4:7, x,y] = (0, 0, 0)
+            elif unit.type == Constants.UNIT_TYPES.CART:
+                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
+                resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
+                b[2:4, x,y] = (1, resource) 
+                b[7:10, x,y] = (0, 0, 0)     
+        
+        # target city tile
+        if city_tile is not None:
+            x = city_tile.pos.x + x_shift
+            y = city_tile.pos.y + y_shift 
+            city = game.cities[city_tile.city_id]
+            fuel = city.fuel
+            lightupkeep = city.get_light_upkeep()
+            max_cooldown = GAME_CONSTANTS["PARAMETERS"]["CITY_ACTION_COOLDOWN"]
+            fuel_ratio = min(fuel / lightupkeep, max_cooldown) / max_cooldown
+            b[16:18, x, y] = (1, fuel_ratio)
+                
+            if city.team == team:
+                b[18:21, x, y] = (0, 0, 0)
+            else:
+                b[21:24, x, y] = (0, 0, 0)
+        
+        assert np.sum(b > 1) == 0
+        return b 
     
+    def get_base_cnn_observation(self, game, team):
+        """
+         Implements getting a observation from the current game for this unit or city
+         0ch: target unit(worker) pos
+         1ch: target unit(worker) resource
+         2ch: target unit(cart) pos
+         3ch: target unit(cart) pos
+         4ch: own unit(worker) pos
+         5ch: own unit(worker) cooldown
+         6ch: own unit(worker) resource
+         7ch: own unit(cart) pos
+         8ch: own unit(cart) cooldown
+         9ch: own unit(cart) resource
+        10ch: opponent unit(worker) pos
+        11ch: opponent unit(worker) cooldown
+        12ch: opponent unit(worker) resource
+        13ch: opponent unit(cart) pos
+        14ch: opponent unit(cart) cooldown
+        15ch: opponent unit(cart) resource
+        16ch: target citytile pos
+        17ch: target citytile fuel_ratio
+        18ch: own citytile pos
+        19ch: own citytile fuel_ratio
+        20ch: own citytile cooldown
+        21ch: opponent citytile pos
+        22ch: opponent citytile fuel_ratio
+        23ch: opponent citytile cooldown
+        24ch: wood
+        25ch: coal
+        26ch: uranium
+        27ch: own research points
+        28ch: opponent research points
+        29ch: road level
+        30ch: cycle
+        31ch: turn 
+        32ch: map
+        """
+
+        height = game.map.height
+        width = game.map.width
+
+        x_shift = (32 - width) // 2
+        y_shift = (32 - height) // 2
+
+        b = np.zeros((self.n_obs_channel, 32, 32), dtype=np.float32)
+        opponent_team = 1 - team
+        # target unit
+        # if unit is not None:
+        #     x = unit.pos.x + x_shift
+        #     y = unit.pos.y + y_shift
+        #     if unit.type == Constants.UNIT_TYPES.WORKER:
+        #         cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"]
+        #         resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
+        #         b[:2, x,y] = (1, resource)
+        #     elif unit.type == Constants.UNIT_TYPES.CART:
+        #         cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
+        #         resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
+        #         b[2:4, x,y] = (1, resource) 
+
+        # unit
+        for _unit in game.state["teamStates"][team]["units"].values():
+            # if unit is not None:
+            #     if _unit.id == unit.id:
+            #         continue
+
+            x = _unit.pos.x + x_shift
+            y = _unit.pos.y + y_shift
+            if _unit.type == Constants.UNIT_TYPES.WORKER:
+                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
+                cooldown = _unit.cooldown / 6  # TODO なぜか1を超えてしまう
+                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"]
+                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
+                b[4:7, x,y] = (1, cooldown, resource)
+            elif _unit.type == Constants.UNIT_TYPES.CART:
+                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
+                cooldonw = _unit.cooldown / 6
+                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
+                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
+                b[7:10, x,y] = (1, cooldown, resource)   
+        
+        for _unit in game.state["teamStates"][opponent_team]["units"].values():
+            x = _unit.pos.x + x_shift
+            y = _unit.pos.y + y_shift
+            if _unit.type == Constants.UNIT_TYPES.WORKER:
+                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
+                cooldown = _unit.cooldown / 6
+                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"] 
+                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
+                b[10:13, x,y] = (1, cooldown, resource)
+            elif _unit.type == Constants.UNIT_TYPES.CART:
+                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
+                cooldown = _unit.cooldown / 6
+                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
+                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
+                b[13:16, x,y] = (1, cooldown, resource)  
+        
+        # city tile
+        for city in game.cities.values():
+            fuel = city.fuel
+            lightupkeep = city.get_light_upkeep()
+            max_cooldown = GAME_CONSTANTS["PARAMETERS"]["CITY_ACTION_COOLDOWN"]
+            fuel_ratio = min(fuel / lightupkeep, max_cooldown) / max_cooldown
+            for cell in city.city_cells:
+                x = cell.pos.x + x_shift
+                y = cell.pos.y + y_shift
+                cooldown = cell.city_tile.cooldown / max_cooldown
+
+                # target city_tile
+                # if city_tile is not None:
+                #     if (cell.city_tile.pos.x == city_tile.pos.x)&(cell.city_tile.pos.y == city_tile.pos.y):
+                #         b[16:18, x, y] = (1, fuel_ratio)
+                #         continue
+                
+                if city.team == team:
+                    b[18:21, x, y] = (1, fuel_ratio, cooldown)
+                else:
+                    b[21:24, x, y] = (1, fuel_ratio, cooldown)
+        
+        # resource
+        resource_dict = {'wood': 24, 'coal': 25, 'uranium': 26}
+        for cell in game.map.resources:
+            x = cell.pos.x + x_shift
+            y = cell.pos.y + y_shift
+            r_type = cell.resource.type
+            amount = cell.resource.amount / 800
+            idx = resource_dict[r_type]
+            b[idx, x, y] = amount
+        
+        # research points
+        max_rp = GAME_CONSTANTS["PARAMETERS"]["RESEARCH_REQUIREMENTS"]["URANIUM"]
+        b[27, :] = min(game.state["teamStates"][team]["researchPoints"], max_rp) / max_rp
+        b[28, :] = min(game.state["teamStates"][opponent_team]["researchPoints"], max_rp) / max_rp
+        
+        # road
+        for row in game.map.map:
+            for cell in row:
+                if cell.road > 0:
+                    x = cell.pos.x + x_shift
+                    y = cell.pos.y + y_shift
+                    b[29, x,y] = cell.road / 6
+
+
+        # cycle
+        cycle = GAME_CONSTANTS["PARAMETERS"]["DAY_LENGTH"] + GAME_CONSTANTS["PARAMETERS"]["NIGHT_LENGTH"]
+        b[30, :] = game.state["turn"] % cycle / cycle
+        b[31, :] = game.state["turn"] / GAME_CONSTANTS["PARAMETERS"]["MAX_DAYS"]
+        
+        # map
+        b[32, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
+
+        assert np.sum(b > 1) == 0
+        return b 
+
     def get_reward(self, game, is_game_finished, is_new_turn, is_game_error):
         """
         Returns the reward function for this step of the game. Reward should be a
