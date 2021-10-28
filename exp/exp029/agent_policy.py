@@ -274,12 +274,17 @@ class AgentPolicy(AgentWithModel):
         start_time = time.time()
         actions = []
         new_turn = True
-        base_obs = self.get_base_cnn_observation(game, team)
+        if self.arche == "cnn":
+            base_obs = self.get_base_cnn_observation(game, team)
         # Inference the model per-unit
         units = game.state["teamStates"][team]["units"].values()
         for unit in units:
             if unit.can_act():
-                obs = self.get_target_cnn_observation(game, base_obs, unit, None, unit.team, new_turn)
+                if self.arche == "cnn":
+                    obs = self.get_target_cnn_observation(game, base_obs, unit, None, unit.team, new_turn)
+                elif self.arche == "mlp":
+                    obs = self.get_mlp_observation(game, unit, None, unit.team, new_turn)
+                
                 # IMPORTANT: You can change deterministic=True to disable randomness in model inference. Generally,
                 # I've found the agents get stuck sometimes if they are fully deterministic.
                 action_code, _states = self.model.predict(obs, deterministic=False)
@@ -295,7 +300,10 @@ class AgentPolicy(AgentWithModel):
                 for cell in city.city_cells:
                     city_tile = cell.city_tile
                     if city_tile.can_act():
-                        obs = self.get_target_cnn_observation(game, base_obs, None, city_tile, city.team, new_turn)
+                        if self.arche == "cnn":
+                            obs = self.get_target_cnn_observation(game, base_obs, None, city_tile, city.team, new_turn)
+                        elif self.arche == "mlp":
+                            obs = self.get_mlp_observation(game, None, city_tile, city.team, new_turn)
                         # IMPORTANT: You can change deterministic=True to disable randomness in model inference. Generally,
                         # I've found the agents get stuck sometimes if they are fully deterministic.
                         action_code, _states = self.model.predict(obs, deterministic=False)
@@ -312,12 +320,6 @@ class AgentPolicy(AgentWithModel):
 
         return actions
     
-    def get_observation(self, game, unit, city_tile, team, is_new_turn):
-        if self.arche == "mlp":
-            return self.get_mlp_observation(game, unit, city_tile, team, is_new_turn)
-        elif self.arche == "cnn":
-            return self.get_cnn_observation(game, unit, city_tile, team, is_new_turn)
-
     def get_mlp_observation(self, game, unit, city_tile, team, is_new_turn):
         """
         Implements getting a observation from the current game for this unit or city
@@ -556,160 +558,7 @@ class AgentPolicy(AgentWithModel):
 
         return obs
 
-    def get_cnn_observation(self, game, unit, city_tile, team, is_new_turn):
-        """
-         Implements getting a observation from the current game for this unit or city
-         0ch: target unit(worker) pos
-         1ch: target unit(worker) resource
-         2ch: target unit(cart) pos
-         3ch: target unit(cart) pos
-         4ch: own unit(worker) pos
-         5ch: own unit(worker) cooldown
-         6ch: own unit(worker) resource
-         7ch: own unit(cart) pos
-         8ch: own unit(cart) cooldown
-         9ch: own unit(cart) resource
-        10ch: opponent unit(worker) pos
-        11ch: opponent unit(worker) cooldown
-        12ch: opponent unit(worker) resource
-        13ch: opponent unit(cart) pos
-        14ch: opponent unit(cart) cooldown
-        15ch: opponent unit(cart) resource
-        16ch: target citytile pos
-        17ch: target citytile fuel_ratio
-        18ch: own citytile pos
-        19ch: own citytile fuel_ratio
-        20ch: own citytile cooldown
-        21ch: opponent citytile pos
-        22ch: opponent citytile fuel_ratio
-        23ch: opponent citytile cooldown
-        24ch: wood
-        25ch: coal
-        26ch: uranium
-        27ch: own research points
-        28ch: opponent research points
-        29ch: road level
-        30ch: cycle
-        31ch: turn 
-        32ch: map
-        """
-
-        height = game.map.height
-        width = game.map.width
-
-        x_shift = (32 - width) // 2
-        y_shift = (32 - height) // 2
-
-        b = np.zeros((self.n_obs_channel, 32, 32), dtype=np.float32)
-        opponent_team = 1 - team
-        # target unit
-        if unit is not None:
-            x = unit.pos.x + x_shift
-            y = unit.pos.y + y_shift
-            if unit.type == Constants.UNIT_TYPES.WORKER:
-                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"]
-                resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
-                b[:2, x,y] = (1, resource)
-            elif unit.type == Constants.UNIT_TYPES.CART:
-                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
-                resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
-                b[2:4, x,y] = (1, resource) 
-
-        # unit
-        for _unit in game.state["teamStates"][team]["units"].values():
-            if unit is not None:
-                if _unit.id == unit.id:
-                    continue
-
-            x = _unit.pos.x + x_shift
-            y = _unit.pos.y + y_shift
-            if _unit.type == Constants.UNIT_TYPES.WORKER:
-                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
-                cooldown = _unit.cooldown / 6  # TODO なぜか1を超えてしまう
-                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"]
-                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-                b[4:7, x,y] = (1, cooldown, resource)
-            elif _unit.type == Constants.UNIT_TYPES.CART:
-                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
-                cooldonw = _unit.cooldown / 6
-                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
-                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-                b[7:10, x,y] = (1, cooldown, resource)   
-        
-        for _unit in game.state["teamStates"][opponent_team]["units"].values():
-            x = _unit.pos.x + x_shift
-            y = _unit.pos.y + y_shift
-            if _unit.type == Constants.UNIT_TYPES.WORKER:
-                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
-                cooldown = _unit.cooldown / 6
-                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"] 
-                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-                b[10:13, x,y] = (1, cooldown, resource)
-            elif _unit.type == Constants.UNIT_TYPES.CART:
-                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
-                cooldown = _unit.cooldown / 6
-                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
-                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-                b[13:16, x,y] = (1, cooldown, resource)  
-        
-        # city tile
-        for city in game.cities.values():
-            fuel = city.fuel
-            lightupkeep = city.get_light_upkeep()
-            max_cooldown = GAME_CONSTANTS["PARAMETERS"]["CITY_ACTION_COOLDOWN"]
-            fuel_ratio = min(fuel / lightupkeep, max_cooldown) / max_cooldown
-            for cell in city.city_cells:
-                x = cell.pos.x + x_shift
-                y = cell.pos.y + y_shift
-                cooldown = cell.city_tile.cooldown / max_cooldown
-
-                # target city_tile
-                if city_tile is not None:
-                    if (cell.city_tile.pos.x == city_tile.pos.x)&(cell.city_tile.pos.y == city_tile.pos.y):
-                        b[16:18, x, y] = (1, fuel_ratio)
-                        continue
-                
-                if city.team == team:
-                    b[18:21, x, y] = (1, fuel_ratio, cooldown)
-                else:
-                    b[21:24, x, y] = (1, fuel_ratio, cooldown)
-        
-        # resource
-        resource_dict = {'wood': 24, 'coal': 25, 'uranium': 26}
-        for cell in game.map.resources:
-            x = cell.pos.x + x_shift
-            y = cell.pos.y + y_shift
-            r_type = cell.resource.type
-            amount = cell.resource.amount / 800
-            idx = resource_dict[r_type]
-            b[idx, x, y] = amount
-        
-        # research points
-        max_rp = GAME_CONSTANTS["PARAMETERS"]["RESEARCH_REQUIREMENTS"]["URANIUM"]
-        b[27, :] = min(game.state["teamStates"][team]["researchPoints"], max_rp) / max_rp
-        b[28, :] = min(game.state["teamStates"][opponent_team]["researchPoints"], max_rp) / max_rp
-        
-        # road
-        for row in game.map.map:
-            for cell in row:
-                if cell.road > 0:
-                    x = cell.pos.x + x_shift
-                    y = cell.pos.y + y_shift
-                    b[29, x,y] = cell.road / 6
-
-
-        # cycle
-        cycle = GAME_CONSTANTS["PARAMETERS"]["DAY_LENGTH"] + GAME_CONSTANTS["PARAMETERS"]["NIGHT_LENGTH"]
-        b[30, :] = game.state["turn"] % cycle / cycle
-        b[31, :] = game.state["turn"] / GAME_CONSTANTS["PARAMETERS"]["MAX_DAYS"]
-        
-        # map
-        b[32, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
-
-        assert np.sum(b > 1) == 0
-        return b 
-
-    def get_target_cnn_observation(self, game, base_obs, unit, city_tile, team):
+    def get_target_cnn_observation(self, game, base_obs, unit, city_tile, team, is_new_turn):
         """
          Implements getting a observation from the current game for this unit or city
          0ch: target unit(worker) pos
@@ -1011,15 +860,4 @@ class AgentPolicy(AgentWithModel):
 
         return reward
 
-    def turn_heurstics(self, game, is_first_turn):
-        """
-        This is called pre-observation actions to allow for hardcoded heuristics
-        to control a subset of units. Any unit or city that gets an action from this
-        callback, will not create an observation+action.
-
-        Args:
-            game ([type]): Game in progress
-            is_first_turn (bool): True if it's the first turn of a game.
-        """
-        return
     
