@@ -6,7 +6,6 @@ import random
 
 import numpy as np
 from gym import spaces
-
 sys.path.append("../../LuxPythonEnvGym")
 from luxai2021.env.agent import Agent, AgentWithModel
 from luxai2021.game.actions import *
@@ -219,6 +218,7 @@ class AgentPolicy(AgentWithModel):
         self.units_last = 0
         self.city_tiles_last = 0
         self.fuel_collected_last = 0
+        self.research_points_last = 0
 
     def get_observation(self, game, unit, city_tile, team, is_new_turn):
         if self.arche == "mlp":
@@ -664,19 +664,22 @@ class AgentPolicy(AgentWithModel):
         fuel_collected = game.stats["teamStats"][self.team]["fuelGenerated"]
         rewards["rew/r_fuel_collected"] = ( (fuel_collected - self.fuel_collected_last) / 20000 )
         self.fuel_collected_last = fuel_collected
-        
+
+        # Reward for Research Points
+        research_points = game.state["teamStates"][self.team]["researchPoints"]
+        rewards["rew/r_research_points"] = (research_points - self.research_points_last) / 200
+        if (research_points == 50)&(self.research_points_last < 50):
+            rewards["rew/r_research_points_coal_flag"] = 0.25
+        elif (research_points == 200)&(self.research_points_last < 200):
+            rewards["rew/r_research_points_uranium_flag"] = 1
+        self.research_points_last = research_points
+
         # Give a reward of 1.0 per city tile alive at the end of the game
         rewards["rew/r_city_tiles_end"] = 0
         if is_game_finished:
             self.is_last_turn = True
             rewards["rew/r_city_tiles_end"] = city_tile_count - city_tile_count_opponent
 
-            # Example of a game win/loss reward instead
-            # if game.get_winning_team() == self.team:
-            #     rewards["rew/r_game_win"] = 100.0 # Win
-            # else:
-            #     rewards["rew/r_game_win"] = -100.0 # Loss
-        
         reward = 0
         for name, value in rewards.items():
             reward += value

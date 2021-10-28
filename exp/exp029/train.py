@@ -77,9 +77,8 @@ class LuxNet(BaseFeaturesExtractor):
         return p # , v.squeeze(dim=1)
 
 
-
 def get_logger(level=INFO, out_file=None):
-    logger = logging.getLogger()
+    logger = logging.getLogger("Log")
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     logger.handlers = []
     logger.setLevel(level)
@@ -97,8 +96,7 @@ def get_logger(level=INFO, out_file=None):
     # logger.info("logger set up")
     return logger
 
-logger = get_logger(level=INFO, out_file='results.log')
-# logger = configure("./logs", ["stdout", "log", "tensorboard"])
+# logger = get_logger(level=INFO, out_file='results.log')
 
 
 def seed_everything(seed: int = 42):
@@ -251,7 +249,7 @@ def main():
     ###########
     # train
     ###########
-    logger.info("Training model...")
+    print("Training model...")
     try:
         if is_resume:
             model.num_timesteps = resume_num_timesteps
@@ -260,10 +258,10 @@ def main():
             model.learn(total_timesteps=step_count, callback=callbacks)
  
         model.save(path=f'models/rl_model_{step_count}_steps.zip')
-        logger.info(f"Done training model.  this: {step_count}(steps), total: {model.num_timesteps}(steps)")
+        print(f"Done training model.  this: {step_count}(steps), total: {model.num_timesteps}(steps)")
     except:
         model.save(path=f'models/rl_model_{model.num_timesteps}_steps.zip')
-        logger.info(f"There are something errors. Finish training model. total: {model.num_timesteps}(steps)")
+        print(f"There are something errors. Finish training model. total: {model.num_timesteps}(steps)")
         traceback.print_exc()
 
     run.finish()
