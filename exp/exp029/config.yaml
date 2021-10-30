@@ -3,12 +3,13 @@ basic:
   n_envs: 24
   n_steps: 360
   step_count: 100000000 # 100M
-  pretrained_path: models/rl_model_10000000_model.zip
+  pretrained_path: _models/rl_cnn_model_31200000_steps.zip
+  debug: True
 
 resume:
   is_resume: True
-  run_id: faithful-thunder-392  # run id in wandb
-  resume_num_timesteps: 100000000
+  run_id: None  # faithful-thunder-392  # run id in wandb
+  resume_num_timesteps: 0  # 31200000
 
 callbacks:  
   eval:
@@ -22,12 +23,12 @@ callbacks:
   checkpoints:
     save_freq: 50000  # 1,200,000
     save_path: './models/'
-    name_prefix: 'rl_model'
+    name_prefix: None  # overwrite in train.@y
     verbose: 0
 
 model:
     model_update_step_freq: 50000
-    model_arche: "mlp"  # "cnn" or "mlp"
+    model_arche: "cnn"  # "cnn" or "mlp"
     params:
       verbose: 0
       tensorboard_log: "./tensorboard/"
