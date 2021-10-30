@@ -96,6 +96,7 @@ def main():
     n_envs = config["basic"]["n_envs"]
     step_count = config["basic"]["step_count"]
     pretrained_path = config["basic"]["pretrained_path"]
+    debug = config["basic"]["debug"]
 
     model_update_step_freq = config["model"]["model_update_step_freq"]
     model_arche = config["model"]["model_arche"]
@@ -105,6 +106,8 @@ def main():
     run_id = config['resume']['run_id']
 
     ckpt_params = config['callbacks']['checkpoints']
+    ckpt_params["name_prefix"] = f"rl_{model_arche}_model"
+
     eval_params = config['callbacks']['eval']
     model_params = config["model"]["params"]
     seed_everything(seed)
@@ -112,6 +115,12 @@ def main():
     
     if not is_resume:
         run_id = None 
+    if run_id == "None":
+        run_id = None
+
+    mode = None
+    if debug:
+        mode = "disabled"
 
     run = wandb.init(
         project='lux-ai', 
@@ -119,7 +128,8 @@ def main():
         config=config, 
         group=EXP_NAME, 
         resume=is_resume,
-        id = run_id,
+        id=run_id,
+        mode=mode,
         sync_tensorboard=True,# auto-upload sb3's tensorboard metrics
         monitor_gym=False,  # auto-upload the videos of agents playing the game
         save_code=False,  # optional
@@ -213,10 +223,10 @@ def main():
         else:
             model.learn(total_timesteps=step_count, callback=callbacks)
  
-        model.save(path=f'models/rl_model_{step_count}_steps.zip')
+        model.save(path=f'models/rl_{model_arche}_model_{step_count}_steps.zip')
         print(f"Done training model.  this: {step_count}(steps), total: {model.num_timesteps}(steps)")
     except:
-        model.save(path=f'models/rl_model_{model.num_timesteps}_steps.zip')
+        model.save(path=f'models/rl_{model_arche}_model_{model.num_timesteps}_steps.zip')
         print(f"There are something errors. Finish training model. total: {model.num_timesteps}(steps)")
         traceback.print_exc()
 
