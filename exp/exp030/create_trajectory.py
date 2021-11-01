@@ -55,11 +55,11 @@ def filter(episodes, target_sub_id, team_name, only_win):
         else:  # 指定したチームの勝敗関わらずepisodeを取得
             if team_name not in json_load['info']['TeamNames']: 
                 continue
-        filtering_episodes.append((filepath, team_name))
+        filtering_episodes.append(filepath)
     logger.info(f"Number of using episodes: {len(filtering_episodes)}")
     return filtering_episodes
 
-def create_trajectories_dataset_from_json(episode_dir, team_name='Toad Brigade', only_win=False): 
+def create_trajectories_dataset_from_json(episode_dir, output_dir, team_name='Toad Brigade', only_win=False): 
     logger.info(f"Team: {team_name}")
     episodes = [path for path in Path(episode_dir).glob('*.json') if 'output' not in path.name]
 
@@ -72,33 +72,26 @@ def create_trajectories_dataset_from_json(episode_dir, team_name='Toad Brigade',
             latest_lb_list.append(json_load['other']['LatestLB'])            
     sub_df = pd.DataFrame([submission_id_list, latest_lb_list], index=['SubmissionId', 'LatestLB']).T
     target_sub_id = sub_df["SubmissionId"].value_counts().index[0]
-    args = filter(episodes, target_sub_id, team_name, only_win)
+    files = filter(episodes, target_sub_id, team_name, only_win)
+    os.makedirs(output_dir, exist_ok=True)
+    for filepath in tqdm(files):
+        create_trajectory(filepath, output_dir, team_name)
 
-    os.makedirs("trajectory", exist_ok=True)
-    processes = multiprocessing.cpu_count()
-    with multiprocessing.Pool(processes=processes) as pool:
-        dfs = pool.imap_unordered(create_trajectory, args)
-        dfs = list(tqdm(dfs, total=len(args)))
-    traj_df = pd.concat(dfs).reset_index(drop=True)
-    traj_df.to_csv("./trajectory/trajectories.csv", index=False)
-
-def create_trajectory(args):
-    filepath = args[0]
-    team_name = args[1]
+def create_trajectory(filepath, output_dir, team_name):
     with open(filepath) as f:
         json_load = json.load(f)
 
     ep_id = json_load['info']['EpisodeId']
     team = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex
 
-    if os.path.exists(f"trajectory/{ep_id}_0.pickle"):
+    if os.path.exists(output_dir + f"{ep_id}.pickle"):
         return None 
 
     actions = []
     infos = []
     observations = []
-    idx = 0
-    for step in range(len(json_load['steps'])-1):
+    num_steps = len(json_load['steps'])-1
+    for idx, step in enumerate(range(num_steps)):
         if json_load['steps'][step][team]['status'] != 'ACTIVE':
             break
 
@@ -122,20 +115,12 @@ def create_trajectory(args):
             observations.append(obs)
             actions.append(label)
             infos.append({"step": step, "idx": idx})
-            idx += 1
-                
-    assert len(observations) == len(actions) + 1
-    ts = Trajectory(obs=np.array(observations), acts=np.array(actions), infos=np.array(infos))
-    ts = rollout.flatten_trajectories([ts])
-    for idx, data in enumerate(ts):
-        with open(f"trajectory/{ep_id}_{idx}.pickle", mode="wb") as f:
-            pickle.dump({"obs": data["obs"], "next_obs": data["next_obs"]}, f)  
 
-    ts_dict = ts.__dict__
-    del ts_dict["obs"], ts_dict["next_obs"]
-    df = pd.DataFrame(ts_dict)
-    df["ep_id"] = ep_id
-    return df
+    assert len(observations) == len(actions) + 1
+    ts = Trajectory(obs=np.array(observations), acts=np.array(actions), infos=np.array(infos), terminal=True)
+    with open(f"trajectory/{ep_id}.pickle", mode="wb") as f:
+        pickle.dump(ts, f)
+
     
 def to_label(action):
     """action記号をラベルに変換する関数
@@ -352,7 +337,8 @@ def get_game_state(observation):
 
 def main():
     episode_dir = '../../input/lux_ai_toad_episodes_1007/'
-    create_trajectories_dataset_from_json(episode_dir, only_win=False)
+    output_dir = "./trajectory/"
+    create_trajectories_dataset_from_json(episode_dir, output_dir, only_win=False)
 
 if __name__ == '__main__':
     main()
