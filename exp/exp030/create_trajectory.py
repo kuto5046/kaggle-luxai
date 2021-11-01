@@ -3,13 +3,15 @@ import time
 import pickle
 from tqdm import tqdm
 import json 
+import os 
 from pathlib import Path 
 import logging
 import numpy as np 
 import pandas as pd 
 from logging import INFO, DEBUG
 import sys
-
+import multiprocessing
+from imitation.data import rollout
 
 sys.path.append("../../LuxPythonEnvGym/")
 from luxai2021.game.position import Position
@@ -38,76 +40,103 @@ def get_logger(level=INFO, out_file=None):
 
 logger = get_logger(level=INFO, out_file='results.log')
 
+def filter(episodes, target_sub_id, team_name, only_win):
+    filtering_episodes = []
+    for filepath in episodes: 
+        with open(filepath) as f:
+            json_load = json.load(f)
+
+        if json_load['other']['SubmissionId'] != target_sub_id:
+            continue
+        win_index = np.argmax([r or 0 for r in json_load['rewards']])  # win or tie
+        if only_win:  # 指定したチームが勝ったepisodeのみ取得
+            if json_load['info']['TeamNames'][win_index] != team_name:
+                continue
+        else:  # 指定したチームの勝敗関わらずepisodeを取得
+            if team_name not in json_load['info']['TeamNames']: 
+                continue
+        filtering_episodes.append((filepath, team_name))
+    logger.info(f"Number of using episodes: {len(filtering_episodes)}")
+    return filtering_episodes
+
 def create_trajectories_dataset_from_json(episode_dir, team_name='Toad Brigade', only_win=False): 
     logger.info(f"Team: {team_name}")
     episodes = [path for path in Path(episode_dir).glob('*.json') if 'output' not in path.name]
 
     submission_id_list = []
     latest_lb_list = []
-    for filepath in tqdm(episodes): 
+    for filepath in episodes: 
         with open(filepath) as f:
             json_load = json.load(f)
             submission_id_list.append(json_load['other']['SubmissionId'])            
             latest_lb_list.append(json_load['other']['LatestLB'])            
     sub_df = pd.DataFrame([submission_id_list, latest_lb_list], index=['SubmissionId', 'LatestLB']).T
     target_sub_id = sub_df["SubmissionId"].value_counts().index[0]
+    args = filter(episodes, target_sub_id, team_name, only_win)
 
-    using_episodes = 0
-    trajectories = []
-    for filepath in tqdm(episodes): 
-        with open(filepath) as f:
-            json_load = json.load(f)
+    os.makedirs("trajectory", exist_ok=True)
+    processes = multiprocessing.cpu_count()
+    with multiprocessing.Pool(processes=processes) as pool:
+        dfs = pool.imap_unordered(create_trajectory, args)
+        dfs = list(tqdm(dfs, total=len(args)))
+    traj_df = pd.concat(dfs).reset_index(drop=True)
+    traj_df.to_csv("./trajectory/trajectories.csv", index=False)
 
-        if json_load['other']['SubmissionId'] != target_sub_id:
+def create_trajectory(args):
+    filepath = args[0]
+    team_name = args[1]
+    with open(filepath) as f:
+        json_load = json.load(f)
+
+    ep_id = json_load['info']['EpisodeId']
+    team = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex
+
+    if os.path.exists(f"trajectory/{ep_id}_0.pickle"):
+        return None 
+
+    actions = []
+    infos = []
+    observations = []
+    idx = 0
+    for step in range(len(json_load['steps'])-1):
+        if json_load['steps'][step][team]['status'] != 'ACTIVE':
+            break
+
+        game = get_game_state(json_load['steps'][step][0]['observation'])
+        if step == 0:
+            obs = get_cnn_observation(game, None, None, team)
+            observations.append(obs)
             continue
 
-        ep_id = json_load['info']['EpisodeId']
-        win_index = np.argmax([r or 0 for r in json_load['rewards']])  # win or tie
-        if only_win:  # 指定したチームが勝ったepisodeのみ取得
-            if json_load['info']['TeamNames'][win_index] != team_name:
-                continue
-            own_index = win_index
-        else:  # 指定したチームの勝敗関わらずepisodeを取得
-            if team_name not in json_load['info']['TeamNames']: 
-                continue
-            own_index = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex
+        for action in json_load['steps'][step][team]['action']:
+            # moveとbuild cityのaction labelのみが取得される?
+            label, unit_id, tile_pos = to_label(action)
+            if label is None:
+                continue 
+            if unit_id is not None:
+                unit = game.state["teamStates"][team]["units"][unit_id]
+                obs = get_cnn_observation(game, unit, None, team)
+            elif tile_pos is not None:
+                city_tile = game.map.map[tile_pos.x][tile_pos.y].city_tile
+                obs = get_cnn_observation(game, None, city_tile, team)
+            observations.append(obs)
+            actions.append(label)
+            infos.append({"step": step, "idx": idx})
+            idx += 1
+                
+    assert len(observations) == len(actions) + 1
+    ts = Trajectory(obs=np.array(observations), acts=np.array(actions), infos=np.array(infos))
+    ts = rollout.flatten_trajectories([ts])
+    for idx, data in enumerate(ts):
+        with open(f"trajectory/{ep_id}_{idx}.pickle", mode="wb") as f:
+            pickle.dump({"obs": data["obs"], "next_obs": data["next_obs"]}, f)  
 
-        using_episodes += 1
-        actions = []
-        infos = []
-        observations = []
-        for i in range(len(json_load['steps'])-1):
-            if json_load['steps'][i][own_index]['status'] != 'ACTIVE':
-                break
-
-            game = get_game_state(json_load['steps'][i][0]['observation'])
-            if i == 0:
-                obs = get_cnn_observation(game, None, None, own_index)
-                observations.append(obs)
-                continue
-
-            for action in json_load['steps'][i][own_index]['action']:
-                # moveとbuild cityのaction labelのみが取得される?
-                label, unit_id, tile_pos = to_label(action)
-                if label is None:
-                    continue 
-                if unit_id is not None:
-                    unit = game.state["teamStates"][own_index]["units"][unit_id]
-                    obs = get_cnn_observation(game, unit, None, own_index)
-                elif tile_pos is not None:
-                    city_tile = game.map.map[tile_pos.x][tile_pos.y].city_tile
-                    obs = get_cnn_observation(game, None, city_tile, own_index)
-                observations.append(obs)
-                actions.append(label)
-                infos.append({})         
-        ts = Trajectory(obs=np.array(observations), acts=np.array(actions), infos=np.array(infos))
-        trajectories.append(ts)
-        # break
-
-    logger.info(f"obs:{len(observations)} | action: {len(actions)}")
-    logger.info(f"Number of using episodes: {using_episodes}")
-    return trajectories
-
+    ts_dict = ts.__dict__
+    del ts_dict["obs"], ts_dict["next_obs"]
+    df = pd.DataFrame(ts_dict)
+    df["ep_id"] = ep_id
+    return df
+    
 def to_label(action):
     """action記号をラベルに変換する関数
     扱っているのはunit系のactionのみでcity系のactionはNone扱い？
@@ -136,7 +165,7 @@ def to_label(action):
             label_dict = {'c': 0, 'n': 1, 'w': 2, 's': 3, 'e': 4}
             label = label_dict[strs[2]]
         elif strs[0] == 't':
-            label =5
+            label = 5
         elif strs[0] == 'bcity':
             label = 6
     elif strs[0] in ["r", "bw"]:
@@ -320,31 +349,10 @@ def get_game_state(observation):
         game_state.process_updates(observation["updates"])
     return game_state
 
-def get_reward(json_load, index):
-    """
-    WIN: 1
-    TIE: 0
-    LOSE: -1
-    """
-    rewards_list = np.array(json_load['rewards'])
-    rewards_list[np.where(rewards_list==None)] = 0
-
-    enemy_index = 1 - index
-    if rewards_list[index] > rewards_list[enemy_index]:
-        reward = 1
-    elif rewards_list[index] == rewards_list[enemy_index]:
-        reward = 0
-    elif rewards_list[index] < rewards_list[enemy_index]:
-        reward = -1
-    else:
-        NotImplementedError
-    return reward
 
 def main():
     episode_dir = '../../input/lux_ai_toad_episodes_1007/'
-    trajectories = create_trajectories_dataset_from_json(episode_dir, only_win=False)
-    with open("trajectories.pickle", mode="wb") as f:
-        pickle.dump(trajectories, f)
+    create_trajectories_dataset_from_json(episode_dir, only_win=False)
 
 if __name__ == '__main__':
     main()
