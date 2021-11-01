@@ -114,7 +114,10 @@ def main():
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     
     if not is_resume:
-        run_id = None 
+        run_id = None
+        resume = None
+    else:
+        resume = "allow"
     if run_id == "None":
         run_id = None
 
@@ -127,7 +130,7 @@ def main():
         entity='kuto5046', 
         config=config, 
         group=EXP_NAME, 
-        resume=is_resume,
+        resume=resume,
         id=run_id,
         mode=mode,
         sync_tensorboard=True,# auto-upload sb3's tensorboard metrics
@@ -152,6 +155,7 @@ def main():
 
         # Create a default opponent agent and a RL agent in training mode
         opponents["self-play"] = AgentPolicy(mode="inference", arche=model_arche, model=old_model)
+        # opponents["self-play"] = AgentPolicy(mode="inference", arche=model_arche)
 
         player = AgentPolicy(mode="train", arche=model_arche, model=old_model)
         # environmnet
@@ -225,12 +229,12 @@ def main():
  
         model.save(path=f'models/rl_{model_arche}_model_{step_count}_steps.zip')
         print(f"Done training model.  this: {step_count}(steps), total: {model.num_timesteps}(steps)")
+        run.finish()
     except:
         model.save(path=f'models/rl_{model_arche}_model_{model.num_timesteps}_steps.zip')
         print(f"There are something errors. Finish training model. total: {model.num_timesteps}(steps)")
         traceback.print_exc()
-
-    run.finish()
+        raise Exception()
 
 
 if __name__ == "__main__":

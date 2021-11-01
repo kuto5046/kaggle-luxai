@@ -3,13 +3,13 @@ basic:
   n_envs: 24
   n_steps: 360
   step_count: 100000000 # 100M
-  pretrained_path: _models/rl_cnn_model_31200000_steps.zip
-  debug: True
+  pretrained_path: models/rl_cnn_model_18000000_steps.zip
+  debug: False
 
 resume:
   is_resume: True
-  run_id: None  # faithful-thunder-392  # run id in wandb
-  resume_num_timesteps: 0  # 31200000
+  run_id: prime-fog-415  # run id in wandb
+  resume_num_timesteps: 18000000  # 31200000
 
 callbacks:  
   eval:
@@ -23,7 +23,7 @@ callbacks:
   checkpoints:
     save_freq: 50000  # 1,200,000
     save_path: './models/'
-    name_prefix: None  # overwrite in train.@y
+    name_prefix: None  # overwrite in train.py
     verbose: 0
 
 model:

@@ -11,7 +11,7 @@ import glob
 from luxai2021.game.game import Game 
 
 arche = "cnn"
-models = glob.glob(f'./{arche}_models/rl_model_*_steps.zip')
+models = glob.glob(f'./models/rl_{arche}_model_*_steps.zip')
 pretrained_model = sorted(models, key=lambda x: int(x.split('_')[-2]), reverse=True)[0]
 print(pretrained_model)
 model = PPO.load(pretrained_model)
