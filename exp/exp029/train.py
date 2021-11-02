@@ -100,6 +100,7 @@ def main():
 
     model_update_step_freq = config["model"]["model_update_step_freq"]
     model_arche = config["model"]["model_arche"]
+    n_stack = config["model"]["n_stack"]
 
     is_resume = config['resume']['is_resume']
     resume_num_timesteps = config['resume']['resume_num_timesteps']
@@ -157,42 +158,28 @@ def main():
         opponents["self-play"] = AgentPolicy(mode="inference", arche=model_arche, model=old_model)
         # opponents["self-play"] = AgentPolicy(mode="inference", arche=model_arche)
 
-        player = AgentPolicy(mode="train", arche=model_arche, model=old_model)
+        # player = AgentPolicy(mode="train", arche=model_arche, model=old_model, n_envs=n_envs, n_stack=n_stack)
         # environmnet
-        if n_envs == 1:
-            env = LuxEnvironment(configs=configs,
-                                learning_agent=player,
-                                opponent_agents=opponents, 
-                                model_update_step_freq=model_update_step_freq)
-        else:
-            env = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
-                                                            learning_agent=AgentPolicy(mode="train", arche=model_arche, model=old_model),
-                                                            opponent_agents=opponents,
-                                                            model_update_step_freq=model_update_step_freq), i) for i in range(n_envs)])
+        env = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
+                                                        learning_agent=AgentPolicy(mode="train", arche=model_arche, model=old_model),
+                                                        opponent_agents=opponents,
+                                                        model_update_step_freq=model_update_step_freq), i) for i in range(n_envs)])
     else:
-        opponents["self-play"] = AgentPolicy(mode="inference", arche=model_arche)
-        player = AgentPolicy(mode="train", arche=model_arche)
+        opponents["self-play"] = AgentPolicy(mode="inference", arche=model_arche, n_envs=n_envs, n_stack=n_stack)
+        # player = AgentPolicy(mode="train", arche=model_arche, n_envs=n_envs, n_stack=n_stack)
         #  environmnet
-        if n_envs == 1:
-            env = LuxEnvironment(configs=configs,
-                                learning_agent=player,
-                                opponent_agents=opponents, 
-                                initial_opponent_policy="random",
-                                model_update_step_freq=model_update_step_freq)
-        else:
-            env = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
-                                                            learning_agent=AgentPolicy(mode="train", arche=model_arche),
-                                                            opponent_agents=opponents,
-                                                            initial_opponent_policy="random",
-                                                            model_update_step_freq=model_update_step_freq), i) for i in range(n_envs)])
-        
+        env = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
+                                                        learning_agent=AgentPolicy(mode="train", arche=model_arche),
+                                                        opponent_agents=opponents,
+                                                        initial_opponent_policy="random",
+                                                        model_update_step_freq=model_update_step_freq), i) for i in range(n_envs)])
     if model_arche == "mlp":
         model = PPO("MlpPolicy", env, **model_params)
     elif model_arche == "cnn":
         # change custom network
         policy_kwargs = dict(
             features_extractor_class=LuxNet,
-            features_extractor_kwargs=dict(features_dim=player.action_space.n),
+            features_extractor_kwargs=dict(features_dim=env.action_space.n),
         )
         # Attach a ML model from stable_baselines3 and train a RL model
         model = PPO("CnnPolicy", env, policy_kwargs=policy_kwargs, **model_params)
@@ -208,13 +195,12 @@ def main():
     # Since reward metrics don't work for multi-environment setups, we add an evaluation logger
     # for metrics.
     env_eval = None
-    if n_envs > 1:
-        # An evaluation environment is needed to measure multi-env setups. Use a fixed 4 envs.
-        opponents = {"imitation": ImitationAgent()}
-        env_eval = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
-                                                     learning_agent=AgentPolicy(mode="train", arche=model_arche),
-                                                     opponent_agents=opponents), i) for i in range(1)])
-        callbacks.append(EvalCallback(env_eval, **eval_params))
+    # An evaluation environment is needed to measure multi-env setups. Use a fixed 4 envs.
+    opponents = {"imitation": ImitationAgent()}
+    env_eval = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
+                                                    learning_agent=AgentPolicy(mode="train", arche=model_arche),
+                                                    opponent_agents=opponents), i) for i in range(1)])
+    callbacks.append(EvalCallback(env_eval, **eval_params))
 
     ###########
     # train
@@ -234,7 +220,7 @@ def main():
         model.save(path=f'models/rl_{model_arche}_model_{model.num_timesteps}_steps.zip')
         print(f"There are something errors. Finish training model. total: {model.num_timesteps}(steps)")
         traceback.print_exc()
-        raise Exception()
+        raise Exception()  # わざとエラー出してwandbをclashさせる
 
 
 if __name__ == "__main__":
