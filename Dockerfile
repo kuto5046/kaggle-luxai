@@ -52,6 +52,15 @@ ENV PATH /usr/bin:$PATH
 COPY ./requirements.txt /
 RUN pip3 install --upgrade pip && \
     pip3 install -r /requirements.txt
+
+RUN pip install \
+    jupyterlab
+
+# latest imitation library
+RUN git clone http://github.com/HumanCompatibleAI/imitation \
+    cd imitation \
+    pip install -e .
+
 # https://qiita.com/Hiroaki-K4/items/c1be8adba18b9f0b4cef
 # RUN pip3 install torch==1.7.0+cu110 torchvision==0.8.1+cu110 -f https://download.pytorch.org/whl/torch_stable.html
 RUN pip3 install torch==1.9.1+cu111 torchvision==0.10.1+cu111 torchaudio==0.9.1 -f https://download.pytorch.org/whl/torch_stable.html
@@ -75,23 +84,8 @@ RUN chmod 666 /home/${DOCKER_USER}/.kaggle/kaggle.json
 USER ${DOCKER_USER}
 
 RUN git clone https://github.com/kuto5046/dotfiles.git /home/${DOCKER_USER}/dotfiles
-RUN bash /home/${DOCKER_USER}/dotfiles/.bin/install.sh }
+RUN bash /home/${DOCKER_USER}/dotfiles/.bin/install.sh
 
 # jupyter lab
 ENV PATH /home/user/.local/bin:$PATH
 # RUN wget -q -O - https://linux.kite.com/dls/linux/current
-RUN pip install \
-    jupyterlab
-    # 'jupyterlab-kite>=2.0.2' \
-    # jupyterlab-git \ 
-    # lckr-jupyterlab-variableinspector \
-    # black \
-    # jupyterlab_code_formatter
-    # jupyterlab-lsp
-
-RUN jupyter labextension install \
-    @axlair/jupyterlab_vim \
-    @arbennett/base16-nord \
-    @jupyterlab/toc
-    # @kiteco/jupyterlab-kite
-    # @ryantam626/jupyterlab_code_formatter 

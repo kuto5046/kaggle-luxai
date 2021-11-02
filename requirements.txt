@@ -32,7 +32,8 @@ lightgbm==3.1.1
 
 # RL
 kaggle-environments==1.8.12
-stable-baselines3==1.0
+stable-baselines3==0.8.0
+imitation==0.2.0
 
 # other
 pathlib==1.0.1

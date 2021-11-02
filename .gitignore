@@ -7,10 +7,14 @@ exp/*/wandb
 handyrl
 tmp
 notebook/
-LuxPythonEnvGym
-HandyRL
-agents
 exp/*/luxai2021
 exp/*/tensorboard
 exp/*/logs
 exp/*/models
+exp/*/*models
+.vscode
+exp/*/__pycache__/
+agents/*/__pycache__/
+exp/*/results.log
+agents/rulebased
+exp/*/trajectory/
