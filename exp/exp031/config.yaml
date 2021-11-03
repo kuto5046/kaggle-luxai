@@ -1,10 +1,10 @@
 basic:
   seed: 42
-  n_envs: 1
+  n_envs: 24
   n_steps: 360
   step_count: 100000000 # 100M
   pretrained_path: None # models/rl_cnn_model_18000000_steps.zip
-  debug: True
+  debug: False
 
 resume:
   is_resume: False
@@ -29,6 +29,7 @@ callbacks:
 model:
     model_update_step_freq: 50000
     model_arche: "cnn"  # "cnn" or "mlp"
+    n_stack: 4
     params:
       verbose: 0
       tensorboard_log: "./tensorboard/"
