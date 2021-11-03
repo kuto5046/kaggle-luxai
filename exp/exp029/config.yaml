@@ -1,15 +1,15 @@
 basic:
   seed: 42
-  n_envs: 1
+  n_envs: 24
   n_steps: 360
   step_count: 100000000 # 100M
-  pretrained_path: None # models/rl_cnn_model_18000000_steps.zip
-  debug: True
+  pretrained_path: ./models/rl_cnn_model_31200000_steps.zip
+  debug: False
 
 resume:
-  is_resume: False
-  run_id: None  #prime-fog-415  # run id in wandb
-  resume_num_timesteps: 0 # 18000000  # 31200000
+  is_resume: True
+  run_id: proud-blaze-419_v3  # run id in wandb
+  resume_num_timesteps: 31200000
 
 callbacks:  
   eval:
