@@ -19,6 +19,7 @@ from stable_baselines3.common.utils import set_random_seed, get_schedule_fn, get
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.logger import Logger, configure
+from stable_baselines3.common.monitor import Monitor
 from wandb.integration.sb3 import WandbCallback
 
 from agent_policy import AgentPolicy, LuxNet
@@ -66,7 +67,7 @@ def seed_everything(seed: int = 42):
 
 
 # https://stable-baselines3.readthedocs.io/en/master/guide/examples.html?highlight=SubprocVecEnv#multiprocessing-unleashing-the-power-of-vectorized-environments
-def make_env(local_env, rank, seed=0):
+def make_env(local_env, rank, n_stack, seed=0):
     """
     Utility function for multi-processed env.
 
@@ -77,7 +78,10 @@ def make_env(local_env, rank, seed=0):
 
     def _init():
         local_env.seed(seed + rank)
-        return StackObsWrapper(local_env)
+        if local_env.learning_agent.n_stack > 1:
+            return StackObsWrapper(local_env)
+        else:
+            return local_env
 
     set_random_seed(seed)
     return _init
@@ -99,7 +103,6 @@ def main():
     debug = config["basic"]["debug"]
 
     model_update_step_freq = config["model"]["model_update_step_freq"]
-    model_arche = config["model"]["model_arche"]
     n_stack = config["model"]["n_stack"]
 
     is_resume = config['resume']['is_resume']
@@ -107,7 +110,6 @@ def main():
     run_id = config['resume']['run_id']
 
     ckpt_params = config['callbacks']['checkpoints']
-    ckpt_params["name_prefix"] = f"rl_{model_arche}_model"
     eval_params = config['callbacks']['eval']
     model_params = config["model"]["params"]
     seed_everything(seed)

@@ -1,10 +1,10 @@
 basic:
   seed: 42
-  n_envs: 1
+  n_envs: 24
   n_steps: 360
   step_count: 100000000 # 100M
   pretrained_path: models/rl_cnn_model_18000000_steps.zip
-  debug: True
+  debug: False
 
 resume:
   is_resume: False
@@ -14,7 +14,6 @@ resume:
 callbacks:  
   eval:
     best_model_save_path: './models/'
-    # log_path: './models/'
     eval_freq: 3600  # Run it every 10 training iterations
     n_eval_episodes: 3  # Run 5 games
     deterministic: False
@@ -23,12 +22,11 @@ callbacks:
   checkpoints:
     save_freq: 50000  # 1,200,000
     save_path: './models/'
-    name_prefix: None  # overwrite in train.py
+    name_prefix: rl_cnn_model
     verbose: 0
 
 model:
     model_update_step_freq: 50000
-    model_arche: "cnn"  # "cnn" or "mlp"
     n_stack: 4
     params:
       verbose: 0

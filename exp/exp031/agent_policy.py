@@ -118,7 +118,6 @@ class BasicConv2d(nn.Module):
         h = self.bn(h) if self.bn is not None else h
         return h
 
-    
 class LuxNet(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim):
         super(LuxNet, self).__init__(observation_space, features_dim)
@@ -296,9 +295,8 @@ class AgentPolicy(AgentWithModel):
                                 self.action_code_to_action(action_code, game=game, unit=None, city_tile=city_tile,
                                                            team=city.team))
                         new_turn = False
-
-        self.get_last_observation(obs)
-    
+        if self.n_stack > 1:
+            self.get_last_observation(obs)
         time_taken = time.time() - start_time
         if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
             print("WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
@@ -307,11 +305,12 @@ class AgentPolicy(AgentWithModel):
         return actions
 
     def get_last_observation(self, obs):
-        current_unit_obs = np.array([obs[0]+obs[4], obs[10]])  # own worker pos, opponent worker pos
+        current_unit_obs = np.array([obs[4], obs[10]])  # own worker pos, opponent worker pos
+        # assert np.sum(current_unit_obs > 1) == 0
         self.last_unit_obs.append(current_unit_obs)
         if len(self.last_unit_obs)>=self.n_stack:  # 過去情報をn_stack分に保つ
             self.last_unit_obs.pop(0)
-            assert len(self.last_unit_obs) == self.n_stack - 1
+        assert len(self.last_unit_obs) == self.n_stack - 1
 
     def get_observation(self, game, unit, city_tile, team, is_new_turn, last_unit_obs):
         """
@@ -462,7 +461,6 @@ class AgentPolicy(AgentWithModel):
                     y = cell.pos.y + y_shift
                     b[29, x,y] = cell.road / 6
 
-
         # cycle
         cycle = GAME_CONSTANTS["PARAMETERS"]["DAY_LENGTH"] + GAME_CONSTANTS["PARAMETERS"]["NIGHT_LENGTH"]
         b[30, :] = game.state["turn"] % cycle / cycle
@@ -471,8 +469,10 @@ class AgentPolicy(AgentWithModel):
         # map
         b[32, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
 
-        additional_obs = np.concatenate(last_unit_obs, axis=0)
-        b = np.concatenate([b, additional_obs], axis=0)
+        if self.n_stack > 1:
+            additional_obs = np.concatenate(last_unit_obs, axis=0)
+            b = np.concatenate([b, additional_obs], axis=0)
+
         assert np.sum(b > 1) == 0
         assert b.shape == self.observation_space.shape
         return b
@@ -513,7 +513,7 @@ class AgentPolicy(AgentWithModel):
         rewards = {}
         
         # Give a reward for unit creation/death. 0.05 reward per unit.
-        rewards["rew/r_units"] = (unit_count - self.units_last) * 0.05
+        rewards["rew/r_units"] = (unit_count - self.units_last) * 0.005
         self.units_last = unit_count
 
         # Give a reward for city creation/death. 0.1 reward per city.
@@ -540,6 +540,12 @@ class AgentPolicy(AgentWithModel):
             self.is_last_turn = True
             rewards["rew/r_city_tiles_end"] = city_tile_count - city_tile_count_opponent
 
+        # Example of a game win/loss reward instead
+        # if game.get_winning_team() == self.team:
+        #     rewards["rew/r_game_win"] = 10 # Win
+        # else:
+        #     rewards["rew/r_game_win"] = -10 # Loss
+    
         reward = 0
         for name, value in rewards.items():
             reward += value
