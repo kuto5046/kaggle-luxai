@@ -147,7 +147,7 @@ class LuxNet(BaseFeaturesExtractor):
 # This is the Agent that you need to design for the competition
 ########################################################################################################################
 class AgentPolicy(AgentWithModel):
-    def __init__(self, mode="train", model=None, n_stack=4) -> None:
+    def __init__(self, mode="train", arche="mlp", model=None) -> None:
         """
         Arguments:
             mode: "train" or "inference", which controls if this agent is for training or not.
@@ -175,10 +175,14 @@ class AgentPolicy(AgentWithModel):
             ResearchAction,
         ]
         self.action_space = spaces.Discrete(max(len(self.actions_units), len(self.actions_cities)))
-        self.n_stack = n_stack
-        self._n_obs_channel = 33  # base obs
-        self.n_obs_channel = self._n_obs_channel + (2 * (self.n_stack-1))  # base obs + last obs
-        self.observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
+
+        self.arche = arche
+        if arche == "mlp":
+            self.observation_shape = (3 + 7 * 5 * 2 + 1 + 1 + 1 + 2 + 2 + 2 + 3,)
+            self.observation_space = spaces.Box(low=0, high=1, shape=self.observation_shape, dtype=np.float16)
+        elif arche == "cnn":
+            self.n_obs_channel = 33
+            self.observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
         
         self.object_nodes = {}
 
@@ -259,7 +263,7 @@ class AgentPolicy(AgentWithModel):
         self.city_tiles_last = 0
         self.fuel_collected_last = 0
         self.research_points_last = 0
-        self.last_unit_obs = [np.zeros((2, 32, 32)) for i in range(self.n_stack-1)]
+
 
     def process_turn(self, game, team):
         """
@@ -271,11 +275,10 @@ class AgentPolicy(AgentWithModel):
         actions = []
         new_turn = True
         # Inference the model per-unit
-        obs = np.zeros(self.observation_space.shape)
         units = game.state["teamStates"][team]["units"].values()
         for unit in units:
             if unit.can_act():
-                obs = self.get_observation(game, unit, None, unit.team, new_turn, self.last_unit_obs)
+                obs = self.get_observation(game, unit, None, unit.team, new_turn)
                 action_code, _states = self.model.predict(obs, deterministic=False)
                 if action_code is not None:
                     actions.append(
@@ -289,7 +292,7 @@ class AgentPolicy(AgentWithModel):
                 for cell in city.city_cells:
                     city_tile = cell.city_tile
                     if city_tile.can_act():
-                        obs = self.get_observation(game, None, city_tile, city.team, new_turn, self.last_unit_obs)
+                        obs = self.get_observation(game, None, city_tile, city.team, new_turn)
                         action_code, _states = self.model.predict(obs, deterministic=False)
                         if action_code is not None:
                             actions.append(
@@ -297,23 +300,259 @@ class AgentPolicy(AgentWithModel):
                                                            team=city.team))
                         new_turn = False
 
-        self.get_last_observation(obs)
-    
         time_taken = time.time() - start_time
         if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
             print("WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
                   file=sys.stderr)
 
         return actions
+    
 
-    def get_last_observation(self, obs):
-        current_unit_obs = np.array([obs[0]+obs[4], obs[10]])  # own worker pos, opponent worker pos
-        self.last_unit_obs.append(current_unit_obs)
-        if len(self.last_unit_obs)>=self.n_stack:  # 過去情報をn_stack分に保つ
-            self.last_unit_obs.pop(0)
-            assert len(self.last_unit_obs) == self.n_stack - 1
+    def get_observation(self, game, unit, city_tile, team, is_new_turn):
+        if self.arche == "mlp":
+            return self.get_mlp_observation(game, unit, city_tile, team, is_new_turn)
+        elif self.arche == "cnn":
+            return self.get_cnn_observation(game, unit, city_tile, team, is_new_turn)
 
-    def get_observation(self, game, unit, city_tile, team, is_new_turn, last_unit_obs):
+    def get_mlp_observation(self, game, unit, city_tile, team, is_new_turn):
+        """
+        Implements getting a observation from the current game for this unit or city
+        """
+        observation_index = 0
+        if is_new_turn:
+            # It's a new turn this event. This flag is set True for only the first observation from each turn.
+            # Update any per-turn fixed observation space that doesn't change per unit/city controlled.
+
+            # Build a list of object nodes by type for quick distance-searches
+            self.object_nodes = {}
+
+            # Add resources
+            for cell in game.map.resources:
+                if cell.resource.type not in self.object_nodes:
+                    self.object_nodes[cell.resource.type] = np.array([[cell.pos.x, cell.pos.y]])
+                else:
+                    self.object_nodes[cell.resource.type] = np.concatenate(
+                        (
+                            self.object_nodes[cell.resource.type],
+                            [[cell.pos.x, cell.pos.y]]
+                        ),
+                        axis=0
+                    )
+
+            # Add your own and opponent units
+            for t in [team, (team + 1) % 2]:
+                for u in game.state["teamStates"][team]["units"].values():
+                    key = str(u.type)
+                    if t != team:
+                        key = str(u.type) + "_opponent"
+
+                    if key not in self.object_nodes:
+                        self.object_nodes[key] = np.array([[u.pos.x, u.pos.y]])
+                    else:
+                        self.object_nodes[key] = np.concatenate(
+                            (
+                                self.object_nodes[key],
+                                [[u.pos.x, u.pos.y]]
+                            )
+                            , axis=0
+                        )
+
+            # Add your own and opponent cities
+            for city in game.cities.values():
+                for cells in city.city_cells:
+                    key = "city"
+                    if city.team != team:
+                        key = "city_opponent"
+
+                    if key not in self.object_nodes:
+                        self.object_nodes[key] = np.array([[cells.pos.x, cells.pos.y]])
+                    else:
+                        self.object_nodes[key] = np.concatenate(
+                            (
+                                self.object_nodes[key],
+                                [[cells.pos.x, cells.pos.y]]
+                            )
+                            , axis=0
+                        )
+
+        # Observation space: (Basic minimum for a miner agent)
+        # Object:
+        #   1x is worker
+        #   1x is cart
+        #   1x is citytile
+        #   5x direction_nearest_wood
+        #   1x distance_nearest_wood
+        #   1x amount
+        #
+        #   5x direction_nearest_coal
+        #   1x distance_nearest_coal
+        #   1x amount
+        #
+        #   5x direction_nearest_uranium
+        #   1x distance_nearest_uranium
+        #   1x amount
+        #
+        #   5x direction_nearest_city
+        #   1x distance_nearest_city
+        #   1x amount of fuel
+        #
+        #   5x direction_nearest_worker
+        #   1x distance_nearest_worker
+        #   1x amount of cargo
+        #
+        #   28x (the same as above, but direction, distance, and amount to the furthest of each)
+        #
+        # Unit:
+        #   1x cargo size
+        # State:
+        #   1x is night
+        #   1x percent of game done
+        #   2x citytile counts [cur player, opponent]
+        #   2x worker counts [cur player, opponent]
+        #   2x cart counts [cur player, opponent]
+        #   1x research points [cur player]
+        #   1x researched coal [cur player]
+        #   1x researched uranium [cur player]
+        obs = np.zeros(self.observation_shape)
+        
+        # Update the type of this object
+        #   1x is worker
+        #   1x is cart
+        #   1x is citytile
+        observation_index = 0
+        if unit is not None:
+            if unit.type == Constants.UNIT_TYPES.WORKER:
+                obs[observation_index] = 1.0 # Worker
+            else:
+                obs[observation_index+1] = 1.0 # Cart
+        if city_tile is not None:
+            obs[observation_index+2] = 1.0 # CityTile
+        observation_index += 3
+        
+        pos = None
+        if unit is not None:
+            pos = unit.pos
+        else:
+            pos = city_tile.pos
+
+        if pos is None:
+            observation_index += 7 * 5 * 2
+        else:
+            # Encode the direction to the nearest objects
+            #   5x direction_nearest
+            #   1x distance
+            for distance_function in [closest_node, furthest_node]:
+                for key in [
+                    Constants.RESOURCE_TYPES.WOOD,
+                    Constants.RESOURCE_TYPES.COAL,
+                    Constants.RESOURCE_TYPES.URANIUM,
+                    "city",
+                    str(Constants.UNIT_TYPES.WORKER)]:
+                    # Process the direction to and distance to this object type
+
+                    # Encode the direction to the nearest object (excluding itself)
+                    #   5x direction
+                    #   1x distance
+                    if key in self.object_nodes:
+                        if (
+                                (key == "city" and city_tile is not None) or
+                                (unit is not None and str(unit.type) == key and len(game.map.get_cell_by_pos(unit.pos).units) <= 1 )
+                        ):
+                            # Filter out the current unit from the closest-search
+                            closest_index = closest_node((pos.x, pos.y), self.object_nodes[key])
+                            filtered_nodes = np.delete(self.object_nodes[key], closest_index, axis=0)
+                        else:
+                            filtered_nodes = self.object_nodes[key]
+
+                        if len(filtered_nodes) == 0:
+                            # No other object of this type
+                            obs[observation_index + 5] = 1.0
+                        else:
+                            # There is another object of this type
+                            closest_index = distance_function((pos.x, pos.y), filtered_nodes)
+
+                            if closest_index is not None and closest_index >= 0:
+                                closest = filtered_nodes[closest_index]
+                                closest_position = Position(closest[0], closest[1])
+                                direction = pos.direction_to(closest_position)
+                                mapping = {
+                                    Constants.DIRECTIONS.CENTER: 0,
+                                    Constants.DIRECTIONS.NORTH: 1,
+                                    Constants.DIRECTIONS.WEST: 2,
+                                    Constants.DIRECTIONS.SOUTH: 3,
+                                    Constants.DIRECTIONS.EAST: 4,
+                                }
+                                obs[observation_index + mapping[direction]] = 1.0  # One-hot encoding direction
+
+                                # 0 to 1 distance
+                                distance = pos.distance_to(closest_position)
+                                obs[observation_index + 5] = min(distance / 20.0, 1.0)
+
+                                # 0 to 1 value (amount of resource, cargo for unit, or fuel for city)
+                                if key == "city":
+                                    # City fuel as % of upkeep for 200 turns
+                                    c = game.cities[game.map.get_cell_by_pos(closest_position).city_tile.city_id]
+                                    obs[observation_index + 6] = min(
+                                        c.fuel / (c.get_light_upkeep() * 200.0),
+                                        1.0
+                                    )
+                                elif key in [Constants.RESOURCE_TYPES.WOOD, Constants.RESOURCE_TYPES.COAL,
+                                             Constants.RESOURCE_TYPES.URANIUM]:
+                                    # Resource amount
+                                    obs[observation_index + 6] = min(
+                                        game.map.get_cell_by_pos(closest_position).resource.amount / 500,
+                                        1.0
+                                    )
+                                else:
+                                    # Unit cargo
+                                    obs[observation_index + 6] = min(
+                                        next(iter(game.map.get_cell_by_pos(
+                                            closest_position).units.values())).get_cargo_space_left() / 100,
+                                        1.0
+                                    )
+
+                    observation_index += 7
+
+        if unit is not None:
+            # Encode the cargo space
+            #   1x cargo size
+            obs[observation_index] = unit.get_cargo_space_left() / GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"][
+                "WORKER"]
+            observation_index += 1
+        else:
+            observation_index += 1
+
+        # Game state observations
+
+        #   1x is night
+        obs[observation_index] = game.is_night()
+        observation_index += 1
+
+        #   1x percent of game done
+        obs[observation_index] = game.state["turn"] / GAME_CONSTANTS["PARAMETERS"]["MAX_DAYS"]
+        observation_index += 1
+
+        #   2x citytile counts [cur player, opponent]
+        #   2x worker counts [cur player, opponent]
+        #   2x cart counts [cur player, opponent]
+        max_count = 30
+        for key in ["city", str(Constants.UNIT_TYPES.WORKER), str(Constants.UNIT_TYPES.CART)]:
+            if key in self.object_nodes:
+                obs[observation_index] = len(self.object_nodes[key]) / max_count
+            if (key + "_opponent") in self.object_nodes:
+                obs[observation_index + 1] = len(self.object_nodes[(key + "_opponent")]) / max_count
+            observation_index += 2
+
+        #   1x research points [cur player]
+        #   1x researched coal [cur player]
+        #   1x researched uranium [cur player]
+        obs[observation_index] = game.state["teamStates"][team]["researchPoints"] / 200.0
+        obs[observation_index+1] = float(game.state["teamStates"][team]["researched"]["coal"])
+        obs[observation_index+2] = float(game.state["teamStates"][team]["researched"]["uranium"])
+
+        return obs
+
+    def get_cnn_observation(self, game, unit, city_tile, team, is_new_turn):
         """
          Implements getting a observation from the current game for this unit or city
          0ch: target unit(worker) pos
@@ -349,12 +588,6 @@ class AgentPolicy(AgentWithModel):
         30ch: cycle
         31ch: turn 
         32ch: map
-        33ch: own unit pos before 1step
-        34ch: opoonent unit pos before 1step
-        35ch: own unit pos before 2step
-        36ch: opoonent unit pos before 2step
-        37ch: own unit pos before 3step
-        38ch: opoonent unit pos before 3step
         """
 
         height = game.map.height
@@ -363,7 +596,7 @@ class AgentPolicy(AgentWithModel):
         x_shift = (32 - width) // 2
         y_shift = (32 - height) // 2
 
-        b = np.zeros((self._n_obs_channel, 32, 32), dtype=np.float32)
+        b = np.zeros((self.n_obs_channel, 32, 32), dtype=np.float32)
         opponent_team = 1 - team
         # target unit
         if unit is not None:
@@ -471,11 +704,8 @@ class AgentPolicy(AgentWithModel):
         # map
         b[32, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
 
-        additional_obs = np.concatenate(last_unit_obs, axis=0)
-        b = np.concatenate([b, additional_obs], axis=0)
         assert np.sum(b > 1) == 0
-        assert b.shape == self.observation_space.shape
-        return b
+        return b 
 
     def get_reward(self, game, is_game_finished, is_new_turn, is_game_error):
         """

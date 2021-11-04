@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import numpy as np
 from gym import spaces
 
-sys.path.append("../../")
+sys.path.append("../../LuxPythonEnvGym/")
 from luxai2021.env.agent import Agent, AgentWithModel
 from luxai2021.game.actions import *
 from luxai2021.game.game_constants import GAME_CONSTANTS
@@ -148,7 +148,7 @@ class ImitationAgent(Agent):
         self.team = None
         self.match_controller = None
         self.model = LuxNet(num_actions=7, n_obs_channel=23)
-        path = "/home/user/work/agents/imitation/_best.pth"
+        path = "/work/agents/imitation/_best.pth"
         self.model.load_state_dict(torch.load(path))
         # path = "agents/imitation"
         # self.model = torch.jit.load(f'{path}/best.pth')

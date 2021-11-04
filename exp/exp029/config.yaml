@@ -3,13 +3,13 @@ basic:
   n_envs: 24
   n_steps: 360
   step_count: 100000000 # 100M
-  pretrained_path: ./models/rl_cnn_model_31200000_steps.zip
+  pretrained_path: ./models/rl_cnn_model_32400000_steps.zip
   debug: False
 
 resume:
   is_resume: True
   run_id: proud-blaze-419_v3  # run id in wandb
-  resume_num_timesteps: 31200000
+  resume_num_timesteps: 32400000
 
 callbacks:  
   eval:
@@ -23,12 +23,11 @@ callbacks:
   checkpoints:
     save_freq: 50000  # 1,200,000
     save_path: './models/'
-    name_prefix: None  # overwrite in train.py
+    name_prefix: rl_cnn_model
     verbose: 0
 
 model:
     model_update_step_freq: 50000
-    model_arche: "cnn"  # "cnn" or "mlp"
     params:
       verbose: 0
       tensorboard_log: "./tensorboard/"

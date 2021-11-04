@@ -99,6 +99,7 @@ def main():
     debug = config["basic"]["debug"]
 
     model_update_step_freq = config["model"]["model_update_step_freq"]
+    model_arche = config["model"]["model_arche"]
     n_stack = config["model"]["n_stack"]
 
     is_resume = config['resume']['is_resume']
@@ -106,6 +107,7 @@ def main():
     run_id = config['resume']['run_id']
 
     ckpt_params = config['callbacks']['checkpoints']
+    ckpt_params["name_prefix"] = f"rl_{model_arche}_model"
     eval_params = config['callbacks']['eval']
     model_params = config["model"]["params"]
     seed_everything(seed)
@@ -151,6 +153,7 @@ def main():
                                                     model_update_step_freq=model_update_step_freq), i) for i in range(n_envs)])
 
     if os.path.exists(pretrained_path):
+        print(f"\npretrained {pretrained_path}\n")
         model = PPO.load(pretrained_path, device="cuda")
         model.set_env(env)
     else:
