@@ -12,12 +12,16 @@ from logging import INFO, DEBUG
 import sys
 import multiprocessing
 from imitation.data import rollout
+from agent_policy import AgentPolicy
+from agent import get_game_state
 
 sys.path.append("../../LuxPythonEnvGym/")
 from luxai2021.game.position import Position
 from luxai2021.game.constants import Constants, LuxMatchConfigs_Replay
 from luxai2021.game.game import Game 
 from luxai2021.game.game_constants import GAME_CONSTANTS
+
+agent = AgentPolicy(arche="cnn")
 
 def get_logger(level=INFO, out_file=None):
     logger = logging.getLogger()
@@ -91,13 +95,14 @@ def create_trajectory(filepath, output_dir, team_name):
     infos = []
     observations = []
     num_steps = len(json_load['steps'])-1
-    for idx, step in enumerate(range(num_steps)):
-        if json_load['steps'][step][team]['status'] != 'ACTIVE':
-            break
+    idx = 0
+    for step in range(num_steps):
+        # if json_load['steps'][step][team]['status'] != 'ACTIVE':
+        #     break
 
         game = get_game_state(json_load['steps'][step][0]['observation'])
         if step == 0:
-            obs = get_cnn_observation(game, None, None, team)
+            obs = agent.get_observation(game, None, None, team, False)
             observations.append(obs)
             continue
 
@@ -108,13 +113,14 @@ def create_trajectory(filepath, output_dir, team_name):
                 continue 
             if unit_id is not None:
                 unit = game.state["teamStates"][team]["units"][unit_id]
-                obs = get_cnn_observation(game, unit, None, team)
+                obs = agent.get_observation(game, unit, None, team, False)
             elif tile_pos is not None:
                 city_tile = game.map.map[tile_pos.x][tile_pos.y].city_tile
-                obs = get_cnn_observation(game, None, city_tile, team)
+                obs = agent.get_observation(game, None, city_tile, team, False)
             observations.append(obs)
             actions.append(label)
             infos.append({"step": step, "idx": idx})
+            idx += 1
 
     assert len(observations) == len(actions) + 1
     ts = Trajectory(obs=np.array(observations), acts=np.array(actions), infos=np.array(infos), terminal=True)
@@ -163,176 +169,6 @@ def to_label(action):
             label = 1
 
     return label, unit_id, tile_pos
-
-def get_cnn_observation(game, unit, city_tile, team):
-    """
-    Implements getting a observation from the current game for this unit or city
-    0ch: target unit(worker) pos
-    1ch: target unit(worker) resource
-    2ch: target unit(cart) pos
-    3ch: target unit(cart) pos
-    4ch: own unit(worker) pos
-    5ch: own unit(worker) cooldown
-    6ch: own unit(worker) resource
-    7ch: own unit(cart) pos
-    8ch: own unit(cart) cooldown
-    9ch: own unit(cart) resource
-    10ch: opponent unit(worker) pos
-    11ch: opponent unit(worker) cooldown
-    12ch: opponent unit(worker) resource
-    13ch: opponent unit(cart) pos
-    14ch: opponent unit(cart) cooldown
-    15ch: opponent unit(cart) resource
-    16ch: target citytile pos
-    17ch: target citytile fuel_ratio
-    18ch: own citytile pos
-    19ch: own citytile fuel_ratio
-    20ch: own citytile cooldown
-    21ch: opponent citytile pos
-    22ch: opponent citytile fuel_ratio
-    23ch: opponent citytile cooldown
-    24ch: wood
-    25ch: coal
-    26ch: uranium
-    27ch: own research points
-    28ch: opponent research points
-    29ch: road level
-    30ch: cycle
-    31ch: turn 
-    32ch: map
-    """
-
-    height = game.map.height
-    width = game.map.width
-
-    x_shift = (32 - width) // 2
-    y_shift = (32 - height) // 2
-    n_obs_channel = 33
-    b = np.zeros((n_obs_channel, 32, 32), dtype=np.float32)
-    opponent_team = 1 - team
-    # target unit
-    if unit is not None:
-        if unit.type == Constants.UNIT_TYPES.WORKER:
-            x = unit.pos.x + x_shift
-            y = unit.pos.y + y_shift
-            cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"]
-            resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
-            b[:2, x,y] = (1, resource)
-        elif unit.type == Constants.UNIT_TYPES.CART:
-            x = unit.pos.x + x_shift
-            y = unit.pos.y + y_shift 
-            cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
-            resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
-            b[2:4, x,y] = (1, resource) 
-
-
-    # unit
-    for _unit in game.state["teamStates"][team]["units"].values():
-        if unit is not None:
-            if _unit.id == unit.id:
-                continue
-        x = _unit.pos.x + x_shift
-        y = _unit.pos.y + y_shift
-        if _unit.type == Constants.UNIT_TYPES.WORKER:
-            # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
-            cooldown = _unit.cooldown / 6
-            cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"]
-            resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-            b[4:7, x,y] = (1, cooldown, resource)
-        elif _unit.type == Constants.UNIT_TYPES.CART:
-            # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
-            cooldown = _unit.cooldown / 6
-            cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
-            resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-            b[7:10, x,y] = (1, cooldown, resource)   
-    
-    for _unit in game.state["teamStates"][opponent_team]["units"].values():
-        x = _unit.pos.x + x_shift
-        y = _unit.pos.y + y_shift
-        if _unit.type == Constants.UNIT_TYPES.WORKER:
-            # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
-            cooldown = _unit.cooldown / 6
-            cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"] 
-            resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-            b[10:13, x,y] = (1, cooldown, resource)
-        elif _unit.type == Constants.UNIT_TYPES.CART:
-            # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
-            cooldown = _unit.cooldown / 6
-            cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
-            resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-            b[13:16, x,y] = (1, cooldown, resource)  
-    
-    # city tile
-    for city in game.cities.values():
-        fuel = city.fuel
-        lightupkeep = city.get_light_upkeep()
-        max_cooldown = GAME_CONSTANTS["PARAMETERS"]["CITY_ACTION_COOLDOWN"]
-        fuel_ratio = min(fuel / lightupkeep, max_cooldown) / max_cooldown
-        for cell in city.city_cells:
-            x = cell.pos.x + x_shift
-            y = cell.pos.y + y_shift
-            cooldown = cell.city_tile.cooldown / max_cooldown
-
-            # target city_tile
-            if city_tile is not None:
-                if (cell.city_tile.pos.x == city_tile.pos.x)&(cell.city_tile.pos.y == city_tile.pos.y):
-                    b[16:18, x, y] = (1, fuel_ratio)
-                    continue 
-            
-            if city.team == team:
-                b[18:21, x, y] = (1, fuel_ratio, cooldown)
-            else:
-                b[21:24, x, y] = (1, fuel_ratio, cooldown)
-
-    # resource
-    resource_dict = {'wood': 24, 'coal': 25, 'uranium': 26}
-    for cell in game.map.resources:
-        x = cell.pos.x + x_shift
-        y = cell.pos.y + y_shift
-        r_type = cell.resource.type
-        amount = cell.resource.amount / 800
-        idx = resource_dict[r_type]
-        b[idx, x, y] = amount
-    
-    # research points
-    max_rp = GAME_CONSTANTS["PARAMETERS"]["RESEARCH_REQUIREMENTS"]["URANIUM"]
-    b[27, :] = min(game.state["teamStates"][team]["researchPoints"], max_rp) / max_rp
-    b[28, :] = min(game.state["teamStates"][opponent_team]["researchPoints"], max_rp) / max_rp
-    
-    # road
-    for row in game.map.map:
-        for cell in row:
-            if cell.road > 0:
-                x = cell.pos.x + x_shift
-                y = cell.pos.y + y_shift
-                b[29, x,y] = cell.road / 6
-
-
-    # cycle
-    cycle = GAME_CONSTANTS["PARAMETERS"]["DAY_LENGTH"] + GAME_CONSTANTS["PARAMETERS"]["NIGHT_LENGTH"]
-    b[30, :] = game.state["turn"] % cycle / cycle
-    b[31, :] = game.state["turn"] / GAME_CONSTANTS["PARAMETERS"]["MAX_DAYS"]
-    
-    # map
-    b[32, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
-
-    assert np.sum(b > 1) == 0
-    return b 
-
-game_state = None 
-def get_game_state(observation):
-    global game_state
-    if observation["step"] == 0:
-        configs = LuxMatchConfigs_Replay
-        configs["width"] = observation["width"]
-        configs["height"] = observation["height"]
-        game_state = Game(configs)
-        game_state.reset(observation["updates"])
-        game_state.process_updates(observation["updates"][2:])
-        game_state.id = observation["player"]
-    else:
-        game_state.process_updates(observation["updates"])
-    return game_state
 
 
 def main():
