@@ -114,12 +114,14 @@ def create_trajectory(filepath, output_dir, team_name):
             if unit_id is not None:
                 unit = game.state["teamStates"][team]["units"][unit_id]
                 obs = agent.get_observation(game, unit, None, team, False)
+                target = "unit"
             elif tile_pos is not None:
                 city_tile = game.map.map[tile_pos.x][tile_pos.y].city_tile
                 obs = agent.get_observation(game, None, city_tile, team, False)
+                target = "city"
             observations.append(obs)
             actions.append(label)
-            infos.append({"step": step, "idx": idx})
+            infos.append({"step": step, "idx": idx, "target": target})
             idx += 1
 
     assert len(observations) == len(actions) + 1
