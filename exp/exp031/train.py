@@ -67,7 +67,7 @@ def seed_everything(seed: int = 42):
 
 
 # https://stable-baselines3.readthedocs.io/en/master/guide/examples.html?highlight=SubprocVecEnv#multiprocessing-unleashing-the-power-of-vectorized-environments
-def make_env(local_env, rank, n_stack, seed=0):
+def make_env(local_env, rank, seed=0):
     """
     Utility function for multi-processed env.
 
@@ -86,6 +86,11 @@ def make_env(local_env, rank, n_stack, seed=0):
     set_random_seed(seed)
     return _init
 
+def load_model_params(model, model_params):
+    for k, v in model_params.items():
+        if hasattr(model, k):
+            setattr(model, k, v)
+    return model 
 
 def main():
 
@@ -116,7 +121,7 @@ def main():
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     
     if (not is_resume) or (run_id == "None"):
-        run_id = None
+        run_id = wandb.util.generate_id()
 
     mode = None
     if debug:
@@ -158,6 +163,7 @@ def main():
         print(f"\npretrained {pretrained_path}\n")
         model = PPO.load(pretrained_path, device="cuda")
         model.set_env(env)
+        model = load_model_params(model, model_params)
     else:
         policy_kwargs = dict(
             features_extractor_class=LuxNet,
@@ -197,7 +203,7 @@ def main():
         model.save(path=f'models/rl_cnn_model_{step_count}_steps.zip')
         print(f"Done training model.  this: {step_count}(steps), total: {model.num_timesteps}(steps)")
     except:
-        model.save(path=f'models/rl_cnn_model_{model.num_timesteps}_temp_steps.zip')
+        model.save(path=f'models/tmp_rl_cnn_model_{model.num_timesteps}_steps.zip')
         print(f"There are something errors. Finish training model. total: {model.num_timesteps}(steps)")
         traceback.print_exc()
     

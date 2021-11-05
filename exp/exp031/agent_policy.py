@@ -527,7 +527,7 @@ class AgentPolicy(AgentWithModel):
 
         # Reward for Research Points
         research_points = game.state["teamStates"][self.team]["researchPoints"]
-        rewards["rew/r_research_points"] = (research_points - self.research_points_last) / 200
+        rewards["rew/r_research_points"] = (research_points - self.research_points_last) / 200  # 0.005
         if (research_points == 50)&(self.research_points_last < 50):
             rewards["rew/r_research_points_coal_flag"] = 0.25
         elif (research_points == 200)&(self.research_points_last < 200):
@@ -535,16 +535,15 @@ class AgentPolicy(AgentWithModel):
         self.research_points_last = research_points
 
         # Give a reward of 1.0 per city tile alive at the end of the game
-        rewards["rew/r_city_tiles_end"] = 0
+        # rewards["rew/r_city_tiles_end"] = 0
+        # if is_game_finished:
+        #     self.is_last_turn = True
+        #     rewards["rew/r_city_tiles_end"] = city_tile_count - city_tile_count_opponent
         if is_game_finished:
-            self.is_last_turn = True
-            rewards["rew/r_city_tiles_end"] = city_tile_count - city_tile_count_opponent
-
-        # Example of a game win/loss reward instead
-        # if game.get_winning_team() == self.team:
-        #     rewards["rew/r_game_win"] = 10 # Win
-        # else:
-        #     rewards["rew/r_game_win"] = -10 # Loss
+            if game.get_winning_team() == self.team:
+                rewards["rew/r_game_win"] = 10 # Win
+            else:
+                rewards["rew/r_game_win"] = -10 # Loss
     
         reward = 0
         for name, value in rewards.items():

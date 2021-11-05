@@ -3,19 +3,19 @@ basic:
   n_envs: 24
   n_steps: 360
   step_count: 100000000 # 100M
-  pretrained_path: models/rl_cnn_model_18000000_steps.zip
+  pretrained_path: models/rl_cnn_model_38400000_steps.zip
   debug: False
 
 resume:
-  is_resume: False
-  run_id: jolly-armadillo-423  # run id in wandb
-  resume_num_timesteps: 0  # 31200000
+  is_resume: True
+  run_id: glowing-rocket-437_v2  # run id in wandb
+  resume_num_timesteps: 38400000
 
 callbacks:  
   eval:
     best_model_save_path: './models/'
-    eval_freq: 3600  # Run it every 10 training iterations
-    n_eval_episodes: 3  # Run 5 games
+    eval_freq: 3600  
+    n_eval_episodes: 3  # Run 3 games
     deterministic: False
     render: False
 
@@ -34,5 +34,5 @@ model:
       learning_rate: 0.001
       gamma: 0.998
       gae_lambda: 0.95
-      batch_size: 1024
-      n_steps: 1024
+      batch_size: 2048
+      n_steps: 1024  # 元のモデルからは変更できない
