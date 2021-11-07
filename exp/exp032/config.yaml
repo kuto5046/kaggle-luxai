@@ -3,17 +3,18 @@ basic:
   n_envs: 24
   n_steps: 360
   step_count: 100000000 # 100M
-  pretrained_path: None #models/rl_cnn_model_38400000_steps.zip
+  pretrained_path: None # ./models/rl_cnn_model_1200000_steps.zip
   debug: False
 
 resume:
   is_resume: False
-  run_id: None #glowing-rocket-437_v2  # run id in wandb
-  resume_num_timesteps: 0 # 38400000
+  run_id: swept-serenity-454  # run id in wandb
+  resume_num_timesteps: 1200000
 
 callbacks:  
   eval:
     best_model_save_path: './models/'
+    log_path: './logs/'
     eval_freq: 3600  
     n_eval_episodes: 3  # Run 3 games
     deterministic: False

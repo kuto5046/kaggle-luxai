@@ -175,7 +175,7 @@ class AgentPolicy(AgentWithModel):
         ]
         self.action_space = spaces.Discrete(max(len(self.actions_units), len(self.actions_cities)))
         self.n_stack = n_stack
-        self._n_obs_channel = 33  # base obs
+        self._n_obs_channel = 25  # base obs
         self.n_obs_channel = self._n_obs_channel + (2 * (self.n_stack-1))  # base obs + last obs
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
         
@@ -258,6 +258,7 @@ class AgentPolicy(AgentWithModel):
         self.city_tiles_last = 0
         self.fuel_collected_last = 0
         self.research_points_last = 0
+        self.rewards = {}
         self.last_unit_obs = [np.zeros((2, 32, 32)) for i in range(self.n_stack-1)]
 
     def process_turn(self, game, team):
@@ -270,11 +271,12 @@ class AgentPolicy(AgentWithModel):
         actions = []
         new_turn = True
         # Inference the model per-unit
-        obs = np.zeros(self.observation_space.shape)
+        # obs = np.zeros(self.observation_space.shape)
+        base_obs = self.get_base_observation(game, team, self.last_unit_obs)
         units = game.state["teamStates"][team]["units"].values()
         for unit in units:
             if unit.can_act():
-                obs = self.get_observation(game, unit, None, unit.team, new_turn, self.last_unit_obs)
+                obs = self.get_observation(game, unit, None, unit.team, new_turn, base_obs)
                 action_code, _states = self.model.predict(obs, deterministic=False)
                 if action_code is not None:
                     actions.append(
@@ -288,7 +290,7 @@ class AgentPolicy(AgentWithModel):
                 for cell in city.city_cells:
                     city_tile = cell.city_tile
                     if city_tile.can_act():
-                        obs = self.get_observation(game, None, city_tile, city.team, new_turn, self.last_unit_obs)
+                        obs = self.get_observation(game, None, city_tile, city.team, new_turn, base_obs)
                         action_code, _states = self.model.predict(obs, deterministic=False)
                         if action_code is not None:
                             actions.append(
@@ -296,7 +298,7 @@ class AgentPolicy(AgentWithModel):
                                                            team=city.team))
                         new_turn = False
         if self.n_stack > 1:
-            self.get_last_observation(obs)
+            self.get_last_observation(base_obs)
         time_taken = time.time() - start_time
         if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
             print("WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
@@ -305,55 +307,53 @@ class AgentPolicy(AgentWithModel):
         return actions
 
     def get_last_observation(self, obs):
-        current_unit_obs = np.array([obs[4], obs[10]])  # own worker pos, opponent worker pos
+        current_unit_obs = np.array([obs[2], obs[5]])  # own unit pos, opponent unit pos
         # assert np.sum(current_unit_obs > 1) == 0
         self.last_unit_obs.append(current_unit_obs)
         if len(self.last_unit_obs)>=self.n_stack:  # 過去情報をn_stack分に保つ
             self.last_unit_obs.pop(0)
         assert len(self.last_unit_obs) == self.n_stack - 1
 
-    def get_observation(self, game, unit, city_tile, team, is_new_turn, last_unit_obs):
+    def get_base_observation(self, game, team, last_unit_obs):
         """
          Implements getting a observation from the current game for this unit or city
-         0ch: target unit(worker) pos
-         1ch: target unit(worker) resource
-         2ch: target unit(cart) pos
-         3ch: target unit(cart) pos
-         4ch: own unit(worker) pos
-         5ch: own unit(worker) cooldown
-         6ch: own unit(worker) resource
-         7ch: own unit(cart) pos
-         8ch: own unit(cart) cooldown
-         9ch: own unit(cart) resource
-        10ch: opponent unit(worker) pos
-        11ch: opponent unit(worker) cooldown
-        12ch: opponent unit(worker) resource
-        13ch: opponent unit(cart) pos
-        14ch: opponent unit(cart) cooldown
-        15ch: opponent unit(cart) resource
-        16ch: target citytile pos
-        17ch: target citytile fuel_ratio
-        18ch: own citytile pos
-        19ch: own citytile fuel_ratio
-        20ch: own citytile cooldown
-        21ch: opponent citytile pos
-        22ch: opponent citytile fuel_ratio
-        23ch: opponent citytile cooldown
-        24ch: wood
-        25ch: coal
-        26ch: uranium
-        27ch: own research points
-        28ch: opponent research points
-        29ch: road level
-        30ch: cycle
-        31ch: turn 
-        32ch: map
-        33ch: own unit pos before 1step
-        34ch: opoonent unit pos before 1step
-        35ch: own unit pos before 2step
-        36ch: opoonent unit pos before 2step
-        37ch: own unit pos before 3step
-        38ch: opoonent unit pos before 3step
+         0ch: target unit pos
+         1ch: target unit resource
+
+         2ch: own unit pos
+         3ch: own unit cooldown
+         4ch: own unit resource
+         5ch: opponent unit pos
+         6ch: opponent unit cooldown
+         7ch: opponent unit resource
+
+         8ch: target citytile pos
+         9ch: target citytile fuel_ratio
+
+        10ch: own citytile pos
+        11ch: own citytile fuel_ratio
+        12ch: own citytile cooldown
+        13ch: opponent citytile pos
+        14ch: opponent citytile fuel_ratio
+        15ch: opponent citytile cooldown
+
+        16ch: wood
+        17ch: coal
+        18ch: uranium
+
+        19ch: own research points
+        20ch: opponent research points
+        21ch: road level
+        22ch: cycle
+        23ch: turn 
+        24ch: map
+
+        25ch: own unit pos before 1step
+        26ch: opoonent unit pos before 1step
+        27ch: own unit pos before 2step
+        28ch: opoonent unit pos before 2step
+        29ch: own unit pos before 3step
+        30ch: opoonent unit pos before 3step
         """
 
         height = game.map.height
@@ -365,57 +365,33 @@ class AgentPolicy(AgentWithModel):
         b = np.zeros((self._n_obs_channel, 32, 32), dtype=np.float32)
         opponent_team = 1 - team
         # target unit
-        if unit is not None:
-            if unit.type == Constants.UNIT_TYPES.WORKER:
-                x = unit.pos.x + x_shift
-                y = unit.pos.y + y_shift
-                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"]
-                resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
-                b[:2, x,y] = (1, resource)
-            elif unit.type == Constants.UNIT_TYPES.CART:
-                x = unit.pos.x + x_shift
-                y = unit.pos.y + y_shift 
-                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
-                resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
-                b[2:4, x,y] = (1, resource) 
+        # if unit is not None:
+        #     x = unit.pos.x + x_shift
+        #     y = unit.pos.y + y_shift
+        #     cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
+        #     resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
+        #     b[:2, x,y] = (1, resource)
     
-
         # unit
         for _unit in game.state["teamStates"][team]["units"].values():
-            if unit is not None:
-                if _unit.id == unit.id:
-                    continue
+            # if unit is not None:
+                # if _unit.id == unit.id:
+                #     continue
             x = _unit.pos.x + x_shift
             y = _unit.pos.y + y_shift
-            if _unit.type == Constants.UNIT_TYPES.WORKER:
-                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
-                cooldown = _unit.cooldown / 6
-                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"]
-                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-                b[4:7, x,y] = (1, cooldown, resource)
-            elif _unit.type == Constants.UNIT_TYPES.CART:
-                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
-                cooldown = _unit.cooldown / 6
-                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
-                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-                b[7:10, x,y] = (1, cooldown, resource)   
-        
+            cooldown = _unit.cooldown / 6
+            cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
+            resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
+            b[2:5, x,y] = (1, cooldown, resource)
+    
         for _unit in game.state["teamStates"][opponent_team]["units"].values():
             x = _unit.pos.x + x_shift
             y = _unit.pos.y + y_shift
-            if _unit.type == Constants.UNIT_TYPES.WORKER:
-                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["WORKER"]
-                cooldown = _unit.cooldown / 6
-                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["WORKER"] 
-                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-                b[10:13, x,y] = (1, cooldown, resource)
-            elif _unit.type == Constants.UNIT_TYPES.CART:
-                # cooldown = _unit.cooldown / GAME_CONSTANTS["PARAMETERS"]["UNIT_ACTION_COOLDOWN"]["CART"]
-                cooldown = _unit.cooldown / 6
-                cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
-                resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-                b[13:16, x,y] = (1, cooldown, resource)  
-        
+            cooldown = _unit.cooldown / 6
+            cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"] 
+            resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
+            b[5:8, x,y] = (1, cooldown, resource)
+
         # city tile
         for city in game.cities.values():
             fuel = city.fuel
@@ -428,18 +404,18 @@ class AgentPolicy(AgentWithModel):
                 cooldown = cell.city_tile.cooldown / max_cooldown
 
                 # target city_tile
-                if city_tile is not None:
-                    if (cell.city_tile.pos.x == city_tile.pos.x)&(cell.city_tile.pos.y == city_tile.pos.y):
-                        b[16:18, x, y] = (1, fuel_ratio)
-                        continue 
+                # if city_tile is not None:
+                #     if (cell.city_tile.pos.x == city_tile.pos.x)&(cell.city_tile.pos.y == city_tile.pos.y):
+                #         b[8:10, x, y] = (1, fuel_ratio)
+                        # continue 
                 
                 if city.team == team:
-                    b[18:21, x, y] = (1, fuel_ratio, cooldown)
+                    b[10:13, x, y] = (1, fuel_ratio, cooldown)
                 else:
-                    b[21:24, x, y] = (1, fuel_ratio, cooldown)
+                    b[13:16, x, y] = (1, fuel_ratio, cooldown)
 
         # resource
-        resource_dict = {'wood': 24, 'coal': 25, 'uranium': 26}
+        resource_dict = {'wood': 16, 'coal': 17, 'uranium': 18}
         for cell in game.map.resources:
             x = cell.pos.x + x_shift
             y = cell.pos.y + y_shift
@@ -450,8 +426,8 @@ class AgentPolicy(AgentWithModel):
         
         # research points
         max_rp = GAME_CONSTANTS["PARAMETERS"]["RESEARCH_REQUIREMENTS"]["URANIUM"]
-        b[27, :] = min(game.state["teamStates"][team]["researchPoints"], max_rp) / max_rp
-        b[28, :] = min(game.state["teamStates"][opponent_team]["researchPoints"], max_rp) / max_rp
+        b[19, :] = min(game.state["teamStates"][team]["researchPoints"], max_rp) / max_rp
+        b[20, :] = min(game.state["teamStates"][opponent_team]["researchPoints"], max_rp) / max_rp
         
         # road
         for row in game.map.map:
@@ -459,15 +435,15 @@ class AgentPolicy(AgentWithModel):
                 if cell.road > 0:
                     x = cell.pos.x + x_shift
                     y = cell.pos.y + y_shift
-                    b[29, x,y] = cell.road / 6
+                    b[21, x,y] = cell.road / 6
 
         # cycle
         cycle = GAME_CONSTANTS["PARAMETERS"]["DAY_LENGTH"] + GAME_CONSTANTS["PARAMETERS"]["NIGHT_LENGTH"]
-        b[30, :] = game.state["turn"] % cycle / cycle
-        b[31, :] = game.state["turn"] / GAME_CONSTANTS["PARAMETERS"]["MAX_DAYS"]
+        b[22, :] = game.state["turn"] % cycle / cycle
+        b[23, :] = game.state["turn"] / GAME_CONSTANTS["PARAMETERS"]["MAX_DAYS"]
         
         # map
-        b[32, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
+        b[24, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
 
         if self.n_stack > 1:
             additional_obs = np.concatenate(last_unit_obs, axis=0)
@@ -477,11 +453,95 @@ class AgentPolicy(AgentWithModel):
         assert b.shape == self.observation_space.shape
         return b
 
+
+    def get_observation(self, game, unit, city_tile, team, is_new_turn, base_obs):
+        """
+         Implements getting a observation from the current game for this unit or city
+         0ch: target unit pos
+         1ch: target unit resource
+
+         2ch: own unit pos
+         3ch: own unit cooldown
+         4ch: own unit resource
+         5ch: opponent unit pos
+         6ch: opponent unit cooldown
+         7ch: opponent unit resource
+
+         8ch: target citytile pos
+         9ch: target citytile fuel_ratio
+
+        10ch: own citytile pos
+        11ch: own citytile fuel_ratio
+        12ch: own citytile cooldown
+        13ch: opponent citytile pos
+        14ch: opponent citytile fuel_ratio
+        15ch: opponent citytile cooldown
+
+        16ch: wood
+        17ch: coal
+        18ch: uranium
+
+        19ch: own research points
+        20ch: opponent research points
+        21ch: road level
+        22ch: cycle
+        23ch: turn 
+        24ch: map
+
+        25ch: own unit pos before 1step
+        26ch: opoonent unit pos before 1step
+        27ch: own unit pos before 2step
+        28ch: opoonent unit pos before 2step
+        29ch: own unit pos before 3step
+        30ch: opoonent unit pos before 3step
+        """
+        b = base_obs.copy()
+        height = game.map.height
+        width = game.map.width
+
+        x_shift = (32 - width) // 2
+        y_shift = (32 - height) // 2
+
+        opponent_team = 1 - team
+        # target unit
+        if unit is not None:
+            x = unit.pos.x + x_shift
+            y = unit.pos.y + y_shift
+            cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
+            resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
+            b[:2, x,y] = (1, resource)
+
+
+        # target city_tile
+        if city_tile is not None:
+            city = game.cities[city_tile.city_id]
+            fuel = city.fuel
+            lightupkeep = city.get_light_upkeep()
+            max_cooldown = GAME_CONSTANTS["PARAMETERS"]["CITY_ACTION_COOLDOWN"]
+            fuel_ratio = min(fuel / lightupkeep, max_cooldown) / max_cooldown
+            x = city_tile.pos.x
+            y = city_tile.pos.y
+            b[8:10, x, y] = (1, fuel_ratio)
+
+        assert np.sum(b > 1) == 0
+        assert b.shape == self.observation_space.shape
+        return b
+
+
     def get_reward(self, game, is_game_finished, is_new_turn, is_game_error):
         """
         Returns the reward function for this step of the game. Reward should be a
         delta increment to the reward, not the total current reward.
         """
+        self.rewards = {
+            "rew/r_city_tiles": 0,
+            "rew/r_research_points_coal_flag": 0,
+            "rew/r_research_points_uranium_flag": 0,
+            "rew/r_game_win": 0
+            }
+            
+        step = game.state["turn"]
+        step_decay = (360-step)/360
         if is_game_error:
             # Game environment step failed, assign a game lost reward to not incentivise this
             print("Game failed due to error")
@@ -509,29 +569,31 @@ class AgentPolicy(AgentWithModel):
                     city_tile_count += 1
                 else:
                     city_tile_count_opponent += 1
-        
-        rewards = {}
-        
+                
         # Give a reward for unit creation/death. 0.05 reward per unit.
-        rewards["rew/r_units"] = (unit_count - self.units_last) * 0.005
-        self.units_last = unit_count
+        # rewards["rew/r_units"] = (unit_count - self.units_last) * 0.005
+        # self.units_last = unit_count
 
         # Give a reward for city creation/death. 0.1 reward per city.
-        rewards["rew/r_city_tiles"] = (city_tile_count - self.city_tiles_last) * 0.1
-        self.city_tiles_last = city_tile_count
+        # rewards["rew/r_city_tiles"] = (city_tile_count - self.city_tiles_last) * 0.1
+
+        # number of citytile after night
+        if (step > 0)&(step % 40 == 0):
+            self.rewards["rew/r_city_tiles"] += (city_tile_count - self.city_tiles_last) * 0.01
+            self.city_tiles_last = city_tile_count
 
         # Reward collecting fuel
-        fuel_collected = game.stats["teamStats"][self.team]["fuelGenerated"]
-        rewards["rew/r_fuel_collected"] = ( (fuel_collected - self.fuel_collected_last) / 20000 )
-        self.fuel_collected_last = fuel_collected
+        # fuel_collected = game.stats["teamStats"][self.team]["fuelGenerated"]
+        # rewards["rew/r_fuel_collected"] = ( (fuel_collected - self.fuel_collected_last) / 20000 )
+        # self.fuel_collected_last = fuel_collected
 
         # Reward for Research Points
         research_points = game.state["teamStates"][self.team]["researchPoints"]
-        rewards["rew/r_research_points"] = (research_points - self.research_points_last) / 200  # 0.005
+        # rewards["rew/r_research_points"] = (research_points - self.research_points_last) / 200  # 0.005
         if (research_points == 50)&(self.research_points_last < 50):
-            rewards["rew/r_research_points_coal_flag"] = 0.25
+            self.rewards["rew/r_research_points_coal_flag"] += 0.25 * step_decay
         elif (research_points == 200)&(self.research_points_last < 200):
-            rewards["rew/r_research_points_uranium_flag"] = 1
+            self.rewards["rew/r_research_points_uranium_flag"] += 1 * step_decay
         self.research_points_last = research_points
 
         # Give a reward of 1.0 per city tile alive at the end of the game
@@ -541,12 +603,13 @@ class AgentPolicy(AgentWithModel):
         #     rewards["rew/r_city_tiles_end"] = city_tile_count - city_tile_count_opponent
         if is_game_finished:
             if game.get_winning_team() == self.team:
-                rewards["rew/r_game_win"] = 10 # Win
+                self.rewards["rew/r_game_win"] += 1 # Win
             else:
-                rewards["rew/r_game_win"] = -10 # Loss
-    
+                self.rewards["rew/r_game_win"] -= 1 # Loss
+
+
         reward = 0
-        for name, value in rewards.items():
+        for name, value in self.rewards.items():
             reward += value
 
         return reward
