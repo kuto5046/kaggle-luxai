@@ -579,7 +579,8 @@ class AgentPolicy(AgentWithModel):
 
         # number of citytile after night
         if (step > 0)&(step % 40 == 0):
-            self.rewards["rew/r_city_tiles"] += (city_tile_count - self.city_tiles_last) * 0.01
+            self.rewards["rew/r_city_tiles"] += (city_tile_count - city_tile_count_opponent) * 0.01
+            # self.rewards["rew/r_city_tiles"] += (city_tile_count - self.city_tiles_last) * 0.01
             self.city_tiles_last = city_tile_count
 
         # Reward collecting fuel
