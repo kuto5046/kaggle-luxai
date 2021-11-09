@@ -78,8 +78,10 @@ def create_trajectories_dataset_from_json(episode_dir, output_dir, team_name='To
     target_sub_id = sub_df["SubmissionId"].value_counts().index[0]
     files = filter(episodes, target_sub_id, team_name, only_win)
     os.makedirs(output_dir, exist_ok=True)
-    for filepath in tqdm(files):
+    for idx, filepath in enumerate(tqdm(files, total=len(files))):
         create_trajectory(filepath, output_dir, team_name)
+        # if idx > 5:
+        #     break
 
 def create_trajectory(filepath, output_dir, team_name):
     with open(filepath) as f:
@@ -88,7 +90,8 @@ def create_trajectory(filepath, output_dir, team_name):
     ep_id = json_load['info']['EpisodeId']
     team = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex
 
-    if os.path.exists(output_dir + f"{ep_id}.pickle"):
+    # if os.path.exists(output_dir + f"{ep_id}.pickle"):
+    if os.path.exists(output_dir + f"{ep_id}_*.pickle"):
         return None 
 
     actions = []
@@ -96,17 +99,16 @@ def create_trajectory(filepath, output_dir, team_name):
     observations = []
     num_steps = len(json_load['steps'])-1
     idx = 0
+    # print(f"\nnum_steps:{num_steps}")
     for step in range(num_steps):
+        game = get_game_state(json_load['steps'][step][0]['observation'])
         # if json_load['steps'][step][team]['status'] != 'ACTIVE':
         #     break
-
-        game = get_game_state(json_load['steps'][step][0]['observation'])
         if step == 0:
-            obs = agent.get_observation(game, None, None, team, False)
+            obs = agent.get_observation(game, None, None, team, False) 
             observations.append(obs)
-            continue
 
-        for action in json_load['steps'][step][team]['action']:
+        for action in json_load['steps'][step+1][team]['action']:
             # moveとbuild cityのaction labelのみが取得される?
             label, unit_id, tile_pos = to_label(action)
             if label is None:
@@ -126,8 +128,12 @@ def create_trajectory(filepath, output_dir, team_name):
 
     assert len(observations) == len(actions) + 1
     ts = Trajectory(obs=np.array(observations), acts=np.array(actions), infos=np.array(infos), terminal=True)
-    with open(f"trajectory/{ep_id}.pickle", mode="wb") as f:
-        pickle.dump(ts, f)
+    ts = rollout.flatten_trajectories([ts])
+    for i, t in enumerate(ts):
+        with open(f"trajectory/{ep_id}_{i}.pickle", mode="wb") as f:
+            pickle.dump(t, f)  
+    # with open(f"trajectory/{ep_id}.pickle", mode="wb") as f:
+    #     pickle.dump(ts, f)
 
     
 def to_label(action):

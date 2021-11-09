@@ -35,13 +35,9 @@ from imitation.util import logger, util
 from torch.utils.data import Dataset, DataLoader
 from agent_policy import AgentPolicy, LuxNet
 
-sys.path.append("../../")
-from agents.imitation.agent_policy import ImitationAgent
-from agents.random.agent_policy import RandomAgent
-
 sys.path.append("../../LuxPythonEnvGym")
 from luxai2021.env.agent import Agent
-from luxai2021.env.lux_env import LuxEnvironment, SaveReplayAndModelCallback, LuxILEnvironment
+from luxai2021.env.lux_env import LuxEnvironment
 from luxai2021.game.constants import LuxMatchConfigs_Default, LuxMatchConfigs_Replay
 from luxai2021.game.game import Game
 
@@ -97,23 +93,17 @@ def make_env(local_env, rank, seed=0):
 
 
 class LuxDataset(Dataset):
-    def __init__(self, trajectories):
-        self.trajectories = trajectories
-        # self.ep_id = df["ep_id"].to_numpy()
-        # self.acts = df["acts"].to_numpy()
-        # self.infos = df["infos"].to_numpy()
-        # self.dones = df["dones"].to_numpy()
-        # self.output_dir = output_dir
+    def __init__(self, files):
+        self.files = files
 
     def __len__(self):
-        return len(self.trajectories)
+        return len(self.files)
 
     def __getitem__(self, idx):
-        file = self.trajectories[idx]
+        file = self.files[idx]
         with open(file, mode="rb") as f:
-            trajectory = pickle.load(f) 
-        ts = rollout.flatten_trajectories([trajectory])
-        return ts
+            traj = pickle.load(f)
+        return traj
 
 def main():
 
@@ -131,6 +121,7 @@ def main():
     trajectory_dir = config["basic"]["trajectory_dir"]
     step_count = config["basic"]["step_count"]
     method = config["basic"]["method"]
+    ckpt_params = config["callbacks"]["checkpoints"]
     model_params = config["model"]["params"]
     batch_size = config["model"]["batch_size"]
     
@@ -140,62 +131,52 @@ def main():
     mode = None
     if debug:
         mode = "disabled"
-    run = wandb.init(
-        project='lux-ai', 
-        entity='kuto5046', 
-        config=config, 
-        group=EXP_NAME, 
-        id = run_id,
-        mode=mode,
-        sync_tensorboard=True,# auto-upload sb3's tensorboard metrics
-        monitor_gym=False,  # auto-upload the videos of agents playing the game
-        save_code=False,  # optional
-    )
+    # run = wandb.init(
+    #     project='lux-ai', 
+    #     entity='kuto5046', 
+    #     config=config, 
+    #     group=EXP_NAME, 
+    #     id = run_id,
+    #     mode=mode,
+    #     sync_tensorboard=True,# auto-upload sb3's tensorboard metrics
+    #     monitor_gym=False,  # auto-upload the videos of agents playing the game
+    #     save_code=False,  # optional
+    # )
     # Run a training job
     configs = LuxMatchConfigs_Default
 
     # jsonデータからtrajectoryを作成
     files = glob.glob(trajectory_dir + "*.pickle")
-    # data_loader = DataLoader(
-    #     LuxDataset(files), 
-    #     batch_size=32, # batch_size, 
-    #     shuffle=True, 
-    #     num_workers=1
-    # )
-    trajectories = []
-    for idx, file in tqdm(enumerate(files), total=len(files)):
-        with open(file, mode="rb") as f:
-            trajectory = pickle.load(f) 
-        trajectories.append(trajectory)
-        if idx >= 80:
-            break 
-
-    data_loader = rollout.flatten_trajectories(trajectories)
-    # Convert List[types.Trajectory] to an instance of `imitation.data.types.Transitions`.
-    # This is a more general dataclass containing unordered
-    # (observation, actions, next_observation) transitions.
-    env = SubprocVecEnv([make_env(LuxILEnvironment(configs=configs,
-                          learning_agent=AgentPolicy(mode="train", arche=model_arche),
-                          opponent_agent=AgentPolicy(mode="train", arche=model_arche)), i) for i in range(n_envs)])
+    data_loader = DataLoader(
+        LuxDataset(files), 
+        batch_size=batch_size,
+        shuffle=True, 
+        num_workers=1
+    )
     
-
-    policy_kwargs = dict(
-            features_extractor_class=LuxNet,
-            features_extractor_kwargs=dict(features_dim=env.action_space.n),
-        )
+    agent = AgentPolicy(mode="train", arche="cnn")
+    opponents = {"self-play":AgentPolicy(mode="train", arche=model_arche)}
+    env = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
+                          learning_agent=agent,
+                          opponent_agents=opponents), i) for i in range(n_envs)])
+    observation_space = agent.observation_space
+    action_space = agent.action_space
+    # callbacks = []
+    # callbacks.append(WandbCallback())
+    # callbacks.append(CheckpointCallback(**ckpt_params))
 
     if method == "BC":
         policy = policies.ActorCriticCnnPolicy(
-            observation_space=env.observation_space, 
-            action_space=env.action_space, 
+            observation_space=observation_space, 
+            action_space=action_space, 
             lr_schedule=ConstantLRSchedule(torch.finfo(torch.float32).max),
             features_extractor_class=LuxNet,
-            features_extractor_kwargs=dict(features_dim=env.action_space.n)
+            features_extractor_kwargs=dict(features_dim=action_space.n)
             )
         # logger.configure("./")
         bc_trainer = BC(
-            observation_space=env.observation_space,
-            action_space=env.action_space,
+            observation_space=observation_space,
+            action_space=action_space,
             policy=policy,
             demonstrations=data_loader,
             batch_size=batch_size,
@@ -205,20 +186,25 @@ def main():
         bc_trainer.save_policy('bc_policy')
 
     elif method == "GAIL":
-        gail_logger = logger.configure("./")
+        policy_kwargs = dict(
+            features_extractor_class=LuxNet,
+            features_extractor_kwargs=dict(features_dim=action_space.n),
+        )
+        # gail_logger = logger.configure("./")
         gail_trainer = gail.GAIL(
             venv=env,
             demonstrations=data_loader,
-            demo_batch_size= batch_size,
+            demo_batch_size=batch_size,
             gen_algo=PPO("CnnPolicy", env, policy_kwargs=policy_kwargs, **model_params),
-            custom_logger=gail_logger,
+            allow_variable_horizon=True,
         )
-        gail_trainer.train(total_timesteps=step_count)
+        gail_trainer.train(
+            total_timesteps=step_count)
         gail_trainer.gen_algo.save("gail_policy")
-    elif method == "AIRL":
-        pass
+        # elif method == "AIRL":
+    #     pass
     
-    run.finish()
+    # run.finish()
 
 
 

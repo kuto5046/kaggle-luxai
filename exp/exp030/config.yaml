@@ -1,25 +1,24 @@
 basic:
   seed: 42
   n_envs: 1
-  run_id: faithful-thunder-392  # run id in wandb
-  debug: True
-  step_count: 1000000 # 1M
-  method: BC   # GAIL  # BC
+  run_id: None  # faithful-thunder-392  # run id in wandb
+  debug: False
+  step_count: 1000000 # 0.1M
+  method: BC
   trajectory_dir: "./trajectory/"
 
 callbacks:  
-
   checkpoints:
-    save_freq: 50000  # 1,200,000
+    save_freq: 5000  # 120000
     save_path: './models/'
     name_prefix: 'rl_model'
     verbose: 0
 
 model:
     model_arche: "cnn"  # "cnn" or "mlp"
-    batch_size: 1024
+    batch_size: 64
     params:
-      verbose: 1
+      verbose: 0
       tensorboard_log: "./tensorboard/"
       learning_rate: 0.001
       gamma: 0.998
