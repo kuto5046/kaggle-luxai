@@ -7,8 +7,8 @@ basic:
   debug: False
 
 resume:
-  is_resume: True
-  run_id: warm-blaze-462  # run id in wandb
+  is_resume: False
+  run_id: None # warm-blaze-462  # run id in wandb
   resume_num_timesteps: 2400000
 
 callbacks:  

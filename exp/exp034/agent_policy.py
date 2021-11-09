@@ -174,8 +174,9 @@ class AgentPolicy(AgentWithModel):
             ResearchAction,
         ]
         self.action_space = spaces.Discrete(max(len(self.actions_units), len(self.actions_cities)))
+        # self.action_space = spaces.Discrete(len(self.actions_units))
         self.n_stack = n_stack
-        self._n_obs_channel = 25  # base obs
+        self._n_obs_channel = 23  # base obs
         self.n_obs_channel = self._n_obs_channel + (2 * (self.n_stack-1))  # base obs + last obs
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
         
@@ -208,6 +209,7 @@ class AgentPolicy(AgentWithModel):
                 y = unit.pos.y
             
             if city_tile != None:
+                action_code = 0  # 一時的に
                 action =  self.actions_cities[action_code%len(self.actions_cities)](
                     game=game,
                     unit_id=unit.id if unit else None,
@@ -274,6 +276,7 @@ class AgentPolicy(AgentWithModel):
         # obs = np.zeros(self.observation_space.shape)
         base_obs = self.get_base_observation(game, team, self.last_unit_obs)
         units = game.state["teamStates"][team]["units"].values()
+        unit_count = len(units)
         for unit in units:
             if unit.can_act():
                 obs = self.get_observation(game, unit, None, unit.team, new_turn, base_obs)
@@ -283,6 +286,13 @@ class AgentPolicy(AgentWithModel):
                         self.action_code_to_action(action_code, game=game, unit=unit, city_tile=None, team=unit.team))
                 new_turn = False
 
+        # city
+        city_tile_count = 0
+        for city in game.cities.values():
+            for cell in city.city_cells:
+                if city.team == team:
+                    city_tile_count += 1
+
         # Inference the model per-city
         cities = game.cities.values()
         for city in cities:
@@ -290,13 +300,24 @@ class AgentPolicy(AgentWithModel):
                 for cell in city.city_cells:
                     city_tile = cell.city_tile
                     if city_tile.can_act():
-                        obs = self.get_observation(game, None, city_tile, city.team, new_turn, base_obs)
-                        action_code, _states = self.model.predict(obs, deterministic=False)
-                        if action_code is not None:
-                            actions.append(
-                                self.action_code_to_action(action_code, game=game, unit=None, city_tile=city_tile,
-                                                           team=city.team))
+                        x = city_tile.pos.x
+                        y = city_tile.pos.y
+                        # obs = self.get_observation(game, None, city_tile, city.team, new_turn, base_obs)
+                        # action_code, _states = self.model.predict(obs, deterministic=False)
+                        # 保有unit数(worker)よりもcity tileの数が多いならworkerを追加
+                        if unit_count < city_tile_count:
+                            action = SpawnWorkerAction(team, None, x, y)
+                            actions.append(action)
+                            unit_count += 1
+
+                        # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
+                        elif not game.state["teamStates"][team]["researched"]["uranium"]:
+                            action = ResearchAction(team, x, y, None)
+                            actions.append(action)
+                            game.state["teamStates"][team]["researchPoints"] += 1
+                        
                         new_turn = False
+                
         if self.n_stack > 1:
             self.get_last_observation(base_obs)
         time_taken = time.time() - start_time
@@ -327,33 +348,27 @@ class AgentPolicy(AgentWithModel):
          6ch: opponent unit cooldown
          7ch: opponent unit resource
 
-         8ch: target citytile pos
-         9ch: target citytile fuel_ratio
+         8ch: own citytile pos
+         9ch: own citytile fuel_ratio
+        10ch: own citytile cooldown
+        11ch: opponent citytile pos
+        12ch: opponent citytile fuel_ratio
+        13ch: opponent citytile cooldown
 
-        10ch: own citytile pos
-        11ch: own citytile fuel_ratio
-        12ch: own citytile cooldown
-        13ch: opponent citytile pos
-        14ch: opponent citytile fuel_ratio
-        15ch: opponent citytile cooldown
+        14ch: wood
+        15ch: coal
+        16ch: uranium
 
-        16ch: wood
-        17ch: coal
-        18ch: uranium
+        17ch: own research points
+        18ch: opponent research points
+        19ch: road level
+        20ch: cycle
+        21ch: turn 
+        22ch: map
 
-        19ch: own research points
-        20ch: opponent research points
-        21ch: road level
-        22ch: cycle
-        23ch: turn 
-        24ch: map
-
-        25ch: own unit pos before 1step
-        26ch: opoonent unit pos before 1step
-        27ch: own unit pos before 2step
-        28ch: opoonent unit pos before 2step
-        29ch: own unit pos before 3step
-        30ch: opoonent unit pos before 3step
+        for stack
+        23ch: own unit pos before 1step
+        24ch: opoonent unit pos before 1step
         """
 
         height = game.map.height
@@ -410,12 +425,12 @@ class AgentPolicy(AgentWithModel):
                         # continue 
                 
                 if city.team == team:
-                    b[10:13, x, y] = (1, fuel_ratio, cooldown)
+                    b[8:11, x, y] = (1, fuel_ratio, cooldown)
                 else:
-                    b[13:16, x, y] = (1, fuel_ratio, cooldown)
+                    b[11:14, x, y] = (1, fuel_ratio, cooldown)
 
         # resource
-        resource_dict = {'wood': 16, 'coal': 17, 'uranium': 18}
+        resource_dict = {'wood': 14, 'coal': 15, 'uranium': 16}
         for cell in game.map.resources:
             x = cell.pos.x + x_shift
             y = cell.pos.y + y_shift
@@ -426,8 +441,8 @@ class AgentPolicy(AgentWithModel):
         
         # research points
         max_rp = GAME_CONSTANTS["PARAMETERS"]["RESEARCH_REQUIREMENTS"]["URANIUM"]
-        b[19, :] = min(game.state["teamStates"][team]["researchPoints"], max_rp) / max_rp
-        b[20, :] = min(game.state["teamStates"][opponent_team]["researchPoints"], max_rp) / max_rp
+        b[17, :] = min(game.state["teamStates"][team]["researchPoints"], max_rp) / max_rp
+        b[18, :] = min(game.state["teamStates"][opponent_team]["researchPoints"], max_rp) / max_rp
         
         # road
         for row in game.map.map:
@@ -435,15 +450,15 @@ class AgentPolicy(AgentWithModel):
                 if cell.road > 0:
                     x = cell.pos.x + x_shift
                     y = cell.pos.y + y_shift
-                    b[21, x,y] = cell.road / 6
+                    b[19, x,y] = cell.road / 6
 
         # cycle
         cycle = GAME_CONSTANTS["PARAMETERS"]["DAY_LENGTH"] + GAME_CONSTANTS["PARAMETERS"]["NIGHT_LENGTH"]
-        b[22, :] = game.state["turn"] % cycle / cycle
-        b[23, :] = game.state["turn"] / GAME_CONSTANTS["PARAMETERS"]["MAX_DAYS"]
+        b[20, :] = game.state["turn"] % cycle / cycle
+        b[21, :] = game.state["turn"] / GAME_CONSTANTS["PARAMETERS"]["MAX_DAYS"]
         
         # map
-        b[24, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
+        b[22, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
 
         if self.n_stack > 1:
             additional_obs = np.concatenate(last_unit_obs, axis=0)
@@ -513,15 +528,15 @@ class AgentPolicy(AgentWithModel):
 
 
         # target city_tile
-        if city_tile is not None:
-            city = game.cities[city_tile.city_id]
-            fuel = city.fuel
-            lightupkeep = city.get_light_upkeep()
-            max_cooldown = GAME_CONSTANTS["PARAMETERS"]["CITY_ACTION_COOLDOWN"]
-            fuel_ratio = min(fuel / lightupkeep, max_cooldown) / max_cooldown
-            x = city_tile.pos.x
-            y = city_tile.pos.y
-            b[8:10, x, y] = (1, fuel_ratio)
+        # if city_tile is not None:
+        #     city = game.cities[city_tile.city_id]
+        #     fuel = city.fuel
+        #     lightupkeep = city.get_light_upkeep()
+        #     max_cooldown = GAME_CONSTANTS["PARAMETERS"]["CITY_ACTION_COOLDOWN"]
+        #     fuel_ratio = min(fuel / lightupkeep, max_cooldown) / max_cooldown
+        #     x = city_tile.pos.x
+        #     y = city_tile.pos.y
+        #     b[8:10, x, y] = (1, fuel_ratio)
 
         assert np.sum(b > 1) == 0
         assert b.shape == self.observation_space.shape
@@ -615,4 +630,4 @@ class AgentPolicy(AgentWithModel):
 
         return reward
 
-    
+

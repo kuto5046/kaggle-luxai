@@ -42,7 +42,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from luxai2021.env.agent import Agent
 from luxai2021.env.lux_env import (LuxEnvironment, SaveReplayAndModelCallback,
-                                   StackObsWrapper)
+                                   CustomEnvWrapper)
 from luxai2021.game.constants import LuxMatchConfigs_Default
 from luxai2021.game.game import Game
 from stable_baselines3.common import base_class
@@ -322,7 +322,7 @@ def make_env(local_env, rank, seed=0):
     def _init():
         local_env.seed(seed + rank)
         if local_env.learning_agent.n_stack > 1:
-            return StackObsWrapper(local_env)
+            return CustomEnvWrapper(local_env)
         else:
             return local_env
 
