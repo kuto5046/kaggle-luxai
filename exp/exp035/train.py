@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import pickle
 import os
+import shutil
 from numpy.core.overrides import array_function_from_dispatcher
 import wandb
 import random
@@ -82,6 +83,30 @@ def to_label(action):
         label = None
     return unit_id, label
 
+
+# def to_label(action):
+#     unit_id = None
+#     pos = None
+#     label = None 
+#     strs = action.split(' ')
+#     if strs[0] in ['m', 't', 'bcity']:
+#         unit_id = strs[1]
+#         if strs[0] == 'm':
+#             label_dict = {'c': 0, 'n': 1, 'w': 2, 's': 3, 'e': 4}
+#             label = label_dict[strs[2]]
+#         elif strs[0] == 't':
+#             label = 5
+#         elif strs[0] == 'bcity':
+#             label = 6
+
+#     elif strs[0] in ['r', 'bw']:
+#         pos = (strs[1], strs[2])
+#         if strs[0] == 'r':
+#             label = 0
+#         elif strs[1] == 'bw':
+#             label = 1
+#     return unit_id, label, pos
+ 
 def depleted_resources(obs):
     for u in obs['updates']:
         if u.split(' ')[0] == 'r':
@@ -132,12 +157,12 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
         with open(filepath) as f:
             json_load = json.load(f)
 
-        # if json_load['other']['SubmissionId'] != target_sub_id:
-        #     continue
+        if json_load['other']['SubmissionId'] != target_sub_id:
+            continue
 
         ep_id = json_load['info']['EpisodeId']
 
-        # if os.path.exists(f"{data_dir}_*.pickle"):
+        # if os.path.exists(f"{data_dir}/{ep_id}_*.pickle"):
         #     continue
 
         win_index = np.argmax([r or 0 for r in json_load['rewards']])  # win or tie
@@ -187,7 +212,7 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
     df = pd.DataFrame()
     df['label'] = labels
     df['obs_id'] = obs_ids
-    df['unit_id'] = unit_id
+    df['unit_id'] = unit_ids
     df.to_csv(data_dir + 'data.csv', index=False)
     logger.info(f"空のactionsの数: {non_actions_count}")
     return df
@@ -221,7 +246,7 @@ def make_input(obs, unit_id, n_obs_channel):
                 # Position and Cargo
                 b[:2, x, y] = (
                     1,
-                    (wood + coal + uranium) / 100
+                    (wood + coal + uranium) / 2000
                 )
             else:
                 # Units
@@ -231,7 +256,7 @@ def make_input(obs, unit_id, n_obs_channel):
                 b[idx:idx + 3, x, y] = (
                     1,
                     cooldown / 6,
-                    (wood + coal + uranium) / 100
+                    (wood + coal + uranium) / 2000
                 )
         elif input_identifier == 'ct':
             # CityTiles
@@ -297,7 +322,27 @@ class LuxDataset(Dataset):
         unit_id = self.unit_ids[idx]
         with open(self.data_dir + f"{obs_id}.pickle", mode="rb") as f:    
             obs = pickle.load(f)
-        state = make_input(obs, unit_id, self.n_obs_channel)        
+        state = make_input(obs, unit_id, self.n_obs_channel)  
+
+        
+        # state = state.transpose(1,2,0) # (c,w,h) -> (w,h,c)
+        # # vertical flip
+        # if torch.rand(1) > 0.5:
+        #     state = np.fliplr(state).copy()
+        #     if action == 2:
+        #         action = 3
+        #     elif action == 3:
+        #         action = 2
+
+        # # horizontal flip
+        # if torch.rand(1) > 0.5:
+        #     state = np.flipud(state).copy()
+        #     if action == 0:
+        #         action = 1
+        #     elif action == 1:
+        #         action = 0
+        # state = state.transpose(2,0,1)  # (w,h,c) -> (c,w,h)
+
         return state, action
 
 
@@ -327,7 +372,7 @@ class LuxNet(BaseFeaturesExtractor):
         self.num_actions = features_dim
         self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
         self.head_p = nn.Linear(filters, self.num_actions, bias=False)
-        self.head_v = nn.Linear(filters*2, 1, bias=False)  # for value(reward)
+        # self.head_v = nn.Linear(filters*2, 1, bias=False)  # for value(reward)
 
     def forward(self, x):
         h = F.relu_(self.conv0(x))
@@ -336,9 +381,9 @@ class LuxNet(BaseFeaturesExtractor):
         # h = (batch, c, w, h) -> (batch, c) 
         # h:(64,32,32,32)
         h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # h=head: (64, 32)
-        h_avg = h.view(h.size(0), h.size(1), -1).mean(-1)  # h_avg: (64, 32)
+        # h_avg = h.view(h.size(0), h.size(1), -1).mean(-1)  # h_avg: (64, 32)
         p = self.head_p(h_head)  # policy
-        v = torch.tanh(self.head_v(torch.cat([h_head, h_avg], dim=1)))  # value
+        # v = torch.tanh(self.head_v(torch.cat([h_head, h_avg], dim=1)))  # value
         return p  #  , v.squeeze(dim=1)
 
 def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, scheduler, n_obs_channel, num_epochs=2):
@@ -399,7 +444,7 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, sc
             torch.save(model.cpu().state_dict(), 'best.pth')
             best_acc = epoch_acc
 
-        scheduler.step()
+        # scheduler.step()
      
 def main():
     seed = 42
@@ -407,7 +452,7 @@ def main():
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
     episode_dir = '../../input/lux_ai_toad1800_episodes_1108/'
-    data_dir = episode_dir + "data/"
+    data_dir = "./tmp_data/"
     df = create_dataset_from_json(episode_dir, data_dir, only_win=False)
     logger.info(f"obses:{df['obs_id'].nunique()} samples:{len(df)}")
 
@@ -420,28 +465,30 @@ def main():
     observation_space = spaces.Box(low=0, high=1, shape=(n_obs_channel, 32, 32), dtype=np.float16)
     model = LuxNet(observation_space=observation_space, features_dim=len(actions))
     train_df, val_df = train_test_split(df, test_size=0.1, random_state=seed, stratify=labels)
-    
-    batch_size = 2048
+
+    batch_size = 64  # 2048
     train_loader = DataLoader(
         LuxDataset(train_df, data_dir, n_obs_channel), 
         batch_size=batch_size, 
         shuffle=True, 
-        num_workers=12
+        num_workers=24
     )
     val_loader = DataLoader(
         LuxDataset(val_df, data_dir, n_obs_channel), 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=12
+        num_workers=24
     )
     dataloaders_dict = {"train": train_loader, "val": val_loader}
     p_criterion = nn.CrossEntropyLoss()
     v_criterion = nn.MSELoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     scheduler = CosineAnnealingLR(optimizer, T_max=10)
 
-    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, scheduler, n_obs_channel, num_epochs=10)
+    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, scheduler, n_obs_channel, num_epochs=20)
     wandb.finish()
+    shutil.rmtree(data_dir)
+
 
 if __name__ =='__main__':
     main()
