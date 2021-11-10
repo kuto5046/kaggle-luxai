@@ -80,8 +80,8 @@ def create_trajectories_dataset_from_json(episode_dir, output_dir, team_name='To
     os.makedirs(output_dir, exist_ok=True)
     for idx, filepath in enumerate(tqdm(files, total=len(files))):
         create_trajectory(filepath, output_dir, team_name)
-        # if idx > 5:
-        #     break
+        if idx > 5:
+            break
 
 def create_trajectory(filepath, output_dir, team_name):
     with open(filepath) as f:
