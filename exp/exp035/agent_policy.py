@@ -4,6 +4,7 @@ import time
 from functools import partial  # pip install functools
 import copy
 import random
+from PIL.features import features
 import torch 
 import torch.nn as nn 
 import torch.nn.functional as F
@@ -115,16 +116,14 @@ class BasicConv2d(nn.Module):
         h = self.bn(h) if self.bn is not None else h
         return h
 
-
 class LuxNet(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim):
         super(LuxNet, self).__init__(observation_space, features_dim)
         layers, filters = 12, 32
         self.n_obs_channel = observation_space.shape[0]
         self.conv0 = BasicConv2d(self.n_obs_channel, filters, (3, 3), False)
-        self.num_actions = features_dim
         self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
-        self.head_p = nn.Linear(filters, self.num_actions, bias=False)
+        self.head_p = nn.Linear(filters, features_dim, bias=False)
         # self.head_v = nn.Linear(filters*2, 1, bias=False)  # for value(reward)
 
     def forward(self, x):
@@ -140,7 +139,7 @@ class LuxNet(BaseFeaturesExtractor):
         return p  #  , v.squeeze(dim=1)
 
 class ImitationAgent(Agent):
-    def __init__(self, model_path) -> None:
+    def __init__(self, model_path=None) -> None:
         """
         Implements an agent opponent
         """
@@ -160,7 +159,8 @@ class ImitationAgent(Agent):
         self.n_obs_channel = 23
         observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
         self.model = LuxNet(observation_space, features_dim=len(self.actions_units))
-        self.model.load_state_dict(torch.load(model_path))
+        if model_path is not None:
+            self.model.load_state_dict(torch.load(model_path))
         self.model.eval()
 
     def game_start(self, game):
@@ -175,7 +175,7 @@ class ImitationAgent(Agent):
         """
         pass
 
-    def process_turn(self, game, team, observation):
+    def process_turn(self, game, team):
         """
         Decides on a set of actions for the current turn. Not used in training, only inference. Generally
         don't modify this part of the code.
@@ -193,11 +193,12 @@ class ImitationAgent(Agent):
         for unit in units:
             if unit.can_act() and (game.state["turn"] % 40 < 30 or not in_city(unit.pos, game, team)):
                 state = self.get_observation(game, unit, team, base_state)
-                _state = make_input(observation, unit.id, 23)
-                for c in range(_state.shape[0]):
-                    count = ((_state[c] - state[c]) != 0).sum()
-                    if count > 0:
-                        print(f"異なる要素数:{observation['step']}step-{game.state['turn']}step-{c}channel", count)
+                # _state = make_input(observation, unit.id, 23)
+                # for c in range(_state.shape[0]):
+                #     count = ((_state[c] - state[c]) != 0).sum()
+                    # assert count == 0
+                    # if count > 0:
+                    #     print(f"異なる要素数:{observation['step']}step-{c}channel", count)
                      
                 with torch.no_grad():
                     p = self.model(torch.from_numpy(state).unsqueeze(0))
@@ -240,7 +241,6 @@ class ImitationAgent(Agent):
                             game.state["teamStates"][team]["researchPoints"] += 1
 
                         # new_turn = False
-
         time_taken = time.time() - start_time
         if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
             print("WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
@@ -267,14 +267,14 @@ class ImitationAgent(Agent):
             y = _unit.pos.y + y_shift
             cooldown = _unit.cooldown / 6
             resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / 2000
-            b[2:5, x,y] = (1, cooldown, resource)
+            b[2:5, x,y] += (1, cooldown, resource)
         
         for _unit in game.state["teamStates"][opponent_team]["units"].values():
             x = _unit.pos.x + x_shift
             y = _unit.pos.y + y_shift
             cooldown = _unit.cooldown / 6
             resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / 2000
-            b[5:8, x,y] = (1, cooldown, resource)
+            b[5:8, x,y] += (1, cooldown, resource)
         
         # city tile
         for city in game.cities.values():
@@ -338,16 +338,11 @@ class ImitationAgent(Agent):
         if unit is not None:
             x = unit.pos.x + x_shift
             y = unit.pos.y + y_shift
-            resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / 2000
-            b[:2, x,y] = (1, resource)    
+            cooldown = np.array(unit.cooldown / 6, dtype=np.float32)
+            resource = np.array((unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / 2000, dtype=np.float32)
+            b[:2, x, y] = (1, resource)
+            b[2:5, x, y] -= (1, cooldown, resource)
         
-        # unit
-        for _unit in game.state["teamStates"][team]["units"].values():
-            if _unit.id == unit.id:
-                x = _unit.pos.x + x_shift
-                y = _unit.pos.y + y_shift
-                b[2:5, x,y] = (0, 0, 0)
-
         return b 
 
 
@@ -442,7 +437,7 @@ def make_input(obs, unit_id, n_obs_channel):
                 team = int(strs[2])
                 cooldown = float(strs[6])
                 idx = 2 + (team - obs['player']) % 2 * 3
-                b[idx:idx + 3, x, y] = (
+                b[idx:idx + 3, x, y] += (
                     1,
                     cooldown / 6,
                     (wood + coal + uranium) / 2000

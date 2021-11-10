@@ -21,6 +21,10 @@ from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
+from agent_policy import make_input, LuxNet
+import sys
+sys.path.append("../../LuxPythonEnvGym/")
+from luxai2021.game.city import City, CityTile
 
 def get_logger(level=INFO, out_file=None):
     logger = logging.getLogger()
@@ -218,100 +222,14 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
     return df
 
 
-# Input for Neural Network
-def make_input(obs, unit_id, n_obs_channel):
-    width, height = obs['width'], obs['height']
-
-    # mapのサイズを調整するためにshiftするマス数
-    # width=20の場合は6 width=21の場合5
-    x_shift = (32 - width) // 2
-    y_shift = (32 - height) // 2
-    cities = {}
-    
-    # (c, w, h)
-    # mapの最大サイズが(32,32)なのでそれに合わせている
-    b = np.zeros((n_obs_channel, 32, 32), dtype=np.float32)
-    
-    for update in obs['updates']:
-        strs = update.split(' ')
-        input_identifier = strs[0]
-
-        if input_identifier == 'u':
-            x = int(strs[4]) + x_shift
-            y = int(strs[5]) + y_shift
-            wood = int(strs[7])
-            coal = int(strs[8])
-            uranium = int(strs[9])
-            if unit_id == strs[3]:
-                # Position and Cargo
-                b[:2, x, y] = (
-                    1,
-                    (wood + coal + uranium) / 2000
-                )
-            else:
-                # Units
-                team = int(strs[2])
-                cooldown = float(strs[6])
-                idx = 2 + (team - obs['player']) % 2 * 3
-                b[idx:idx + 3, x, y] = (
-                    1,
-                    cooldown / 6,
-                    (wood + coal + uranium) / 2000
-                )
-        elif input_identifier == 'ct':
-            # CityTiles
-            team = int(strs[1])
-            city_id = strs[2]
-            x = int(strs[3]) + x_shift
-            y = int(strs[4]) + y_shift
-            cooldown = int(strs[5])
-            idx = 8 + (team - obs['player']) % 2 * 3
-            b[idx:idx + 3, x, y] = (
-                1,
-                cities[city_id],
-                cooldown / 10
-            )
-        elif input_identifier == 'r':
-            # Resources
-            r_type = strs[1]
-            x = int(strs[2]) + x_shift
-            y = int(strs[3]) + y_shift
-            amt = int(float(strs[4]))
-            b[{'wood': 14, 'coal': 15, 'uranium': 16}[r_type], x, y] = amt / 800
-        elif input_identifier == 'rp':
-            # Research Points
-            team = int(strs[1])
-            rp = int(strs[2])
-            b[17 + (team - obs['player']) % 2, :] = min(rp, 200) / 200
-        elif input_identifier == 'c':
-            # Cities
-            city_id = strs[2]
-            fuel = float(strs[3])
-            lightupkeep = float(strs[4])
-            cities[city_id] = min(fuel / lightupkeep, 10) / 10
-        elif input_identifier == "ccd":
-            x = int(strs[1]) + x_shift
-            y = int(strs[2]) + y_shift
-            road_level = float(strs[3])
-            b[19, x, y] =  road_level / 6
-    
-    # Day/Night Cycle
-    b[20, :] = obs['step'] % 40 / 40
-    # Turns
-    b[21, :] = obs['step'] / 360
-    # Map Size
-    b[22, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
-
-    return b
-
-
 class LuxDataset(Dataset):
-    def __init__(self, df, data_dir, n_obs_channel):
+    def __init__(self, df, data_dir, n_obs_channel, phase):
         self.labels = df['label'].to_numpy()
         self.obs_ids = df['obs_id'].to_numpy()
         self.unit_ids = df['unit_id'].to_numpy()
         self.data_dir = data_dir 
         self.n_obs_channel = n_obs_channel
+        self.phase = phase
         
     def __len__(self):
         return len(self.labels)
@@ -324,69 +242,30 @@ class LuxDataset(Dataset):
             obs = pickle.load(f)
         state = make_input(obs, unit_id, self.n_obs_channel)  
 
-        
-        # state = state.transpose(1,2,0) # (c,w,h) -> (w,h,c)
-        # # vertical flip
-        # if torch.rand(1) > 0.5:
-        #     state = np.fliplr(state).copy()
-        #     if action == 2:
-        #         action = 3
-        #     elif action == 3:
-        #         action = 2
+        if self.phase == 'train':
+            state = state.transpose(1,2,0) # (c,w,h) -> (w,h,c)
+            
+            # flip left/right
+            if torch.rand(1) > 0.5:
+                state = np.fliplr(state).copy()
+                if action == 1:
+                    action = 3
+                elif action == 3:
+                    action = 1
 
-        # # horizontal flip
-        # if torch.rand(1) > 0.5:
-        #     state = np.flipud(state).copy()
-        #     if action == 0:
-        #         action = 1
-        #     elif action == 1:
-        #         action = 0
-        # state = state.transpose(2,0,1)  # (w,h,c) -> (c,w,h)
+            # flip up/down
+            if torch.rand(1) > 0.5:
+                state = np.flipud(state).copy()
+                if action == 4:
+                    action = 2
+                elif action == 2:
+                    action = 4
+            state = state.transpose(2,0,1)  # (w,h,c) -> (c,w,h)
 
         return state, action
 
 
-# Neural Network for Lux AI
-class BasicConv2d(nn.Module):
-    def __init__(self, input_dim, output_dim, kernel_size, bn):
-        super().__init__()
-        self.conv = nn.Conv2d(
-            input_dim, output_dim, 
-            kernel_size=kernel_size, 
-            padding=(kernel_size[0] // 2, kernel_size[1] // 2)
-        )
-        self.bn = nn.BatchNorm2d(output_dim) if bn else None
-
-    def forward(self, x):
-        h = self.conv(x)
-        h = self.bn(h) if self.bn is not None else h
-        return h
-
-
-class LuxNet(BaseFeaturesExtractor):
-    def __init__(self, observation_space, features_dim):
-        super(LuxNet, self).__init__(observation_space, features_dim)
-        layers, filters = 12, 32
-        self.n_obs_channel = observation_space.shape[0]
-        self.conv0 = BasicConv2d(self.n_obs_channel, filters, (3, 3), False)
-        self.num_actions = features_dim
-        self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
-        self.head_p = nn.Linear(filters, self.num_actions, bias=False)
-        # self.head_v = nn.Linear(filters*2, 1, bias=False)  # for value(reward)
-
-    def forward(self, x):
-        h = F.relu_(self.conv0(x))
-        for block in self.blocks:
-            h = F.relu_(h + block(h))
-        # h = (batch, c, w, h) -> (batch, c) 
-        # h:(64,32,32,32)
-        h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # h=head: (64, 32)
-        # h_avg = h.view(h.size(0), h.size(1), -1).mean(-1)  # h_avg: (64, 32)
-        p = self.head_p(h_head)  # policy
-        # v = torch.tanh(self.head_v(torch.cat([h_head, h_avg], dim=1)))  # value
-        return p  #  , v.squeeze(dim=1)
-
-def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, scheduler, n_obs_channel, num_epochs=2):
+def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, scheduler=None, num_epochs=2):
     best_acc = 0.0
 
     for epoch in range(num_epochs):
@@ -431,8 +310,10 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, sc
             epoch_ploss = epoch_ploss / data_size
             # epoch_vloss = epoch_vloss / data_size
             epoch_acc = epoch_acc.double() / data_size
-        
-            if phase=='val':
+            if phase == 'train':
+                wandb.log({'Loss/policy': epoch_ploss, 'ACC/val': epoch_acc})
+                logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Acc: {epoch_acc:.4f}')
+            elif phase=='val':
                 # wandb.log({'Loss/policy': epoch_ploss, 'Loss/value':epoch_vloss, 'ACC/val': epoch_acc})
                 # logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Loss(value): {epoch_vloss:.4f} | Acc: {epoch_acc:.4f}')
                 wandb.log({'Loss/policy': epoch_ploss, 'ACC/val': epoch_acc})
@@ -444,7 +325,8 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, sc
             torch.save(model.cpu().state_dict(), 'best.pth')
             best_acc = epoch_acc
 
-        # scheduler.step()
+        if scheduler is not None:
+            scheduler.step()
      
 def main():
     seed = 42
@@ -468,13 +350,13 @@ def main():
 
     batch_size = 64  # 2048
     train_loader = DataLoader(
-        LuxDataset(train_df, data_dir, n_obs_channel), 
+        LuxDataset(train_df, data_dir, n_obs_channel, phase='train'), 
         batch_size=batch_size, 
         shuffle=True, 
         num_workers=24
     )
     val_loader = DataLoader(
-        LuxDataset(val_df, data_dir, n_obs_channel), 
+        LuxDataset(val_df, data_dir, n_obs_channel, phase='val'), 
         batch_size=batch_size, 
         shuffle=False, 
         num_workers=24
@@ -483,9 +365,9 @@ def main():
     p_criterion = nn.CrossEntropyLoss()
     v_criterion = nn.MSELoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    scheduler = CosineAnnealingLR(optimizer, T_max=10)
+    # scheduler = CosineAnnealingLR(optimizer, T_max=10)
 
-    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, scheduler, n_obs_channel, num_epochs=20)
+    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, num_epochs=20)
     wandb.finish()
     shutil.rmtree(data_dir)
 

@@ -23,11 +23,11 @@ def get_game_state(observation):
         configs["height"] = observation["height"]
         game_state = Game(configs)
         game_state.reset(observation["updates"])
-        game_state.process_updates(observation["updates"][2:])
-        game_state.id = observation["player"]
+        # game_state.id = observation["player"]
     else:
-        game_state.process_updates(observation["updates"])
-        game_state.state["turn"] += 1
+        game_state.reset(observation["updates"], increment_turn=True)
+        # game_state.process_updates(observation["updates"])
+        # game_state.state["turn"] += 1
     return game_state
 
 
@@ -37,7 +37,7 @@ def agent(observation, configuration):
     player = observation.player
     if observation["step"] == 0:
         _agent.game_start(game_state)
-    _actions = _agent.process_turn(game_state, player, observation)
+    _actions = _agent.process_turn(game_state, player)
     
     actions = []
     for action_object in _actions:
