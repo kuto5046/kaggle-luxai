@@ -10,11 +10,13 @@ from agent_policy import AgentPolicy
 import glob 
 from luxai2021.game.game import Game 
 
-models = glob.glob(f'./models/rl_cnn_model_*_steps.zip')
-pretrained_model = sorted(models, key=lambda x: int(x.split('_')[-2]), reverse=True)[0]
+# models = glob.glob(f'./models/rl_cnn_model_*_steps.zip')
+# pretrained_model = sorted(models, key=lambda x: int(x.split('_')[-2]), reverse=True)[0]
+pretrained_model = './tmp_model.zip'
 print(pretrained_model)
 model = PPO.load(pretrained_model)
-_agent = AgentPolicy(mode="inference", model=model, n_stack=4)
+_agent = AgentPolicy(mode="inference", model=model, n_stack=1)
+
 
 
 game_state = None
@@ -27,11 +29,13 @@ def get_game_state(observation):
         configs["height"] = observation["height"]
         game_state = Game(configs)
         game_state.reset(observation["updates"])
-        game_state.process_updates(observation["updates"][2:])
-        game_state.id = observation["player"]
+        # game_state.id = observation["player"]
     else:
-        game_state.process_updates(observation["updates"])
+        game_state.reset(observation["updates"], increment_turn=True)
+        # game_state.process_updates(observation["updates"])
+        # game_state.state["turn"] += 1
     return game_state
+
 
 def agent(observation, configuration):
     global game_state

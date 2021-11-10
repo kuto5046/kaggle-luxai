@@ -9,6 +9,7 @@ from functools import partial  # pip install functools
 from logging import DEBUG, INFO
 from pathlib import Path
 import gym 
+from imitation.algorithms import bc
 import numpy as np
 import torch
 import yaml
@@ -31,6 +32,7 @@ from wandb.integration.sb3 import WandbCallback
 
 import wandb
 from agent_policy import AgentPolicy, LuxNet
+from stable_baselines3.common.policies import ActorCriticCnnPolicy, ActorCriticPolicy
 
 sys.path.append("../../")
 from agents.imitation.agent_policy import ImitationAgent
@@ -321,10 +323,7 @@ def make_env(local_env, rank, seed=0):
 
     def _init():
         local_env.seed(seed + rank)
-        if local_env.learning_agent.n_stack > 1:
-            return CustomEnvWrapper(local_env)
-        else:
-            return local_env
+        return CustomEnvWrapper(local_env)
 
     set_random_seed(seed)
     return _init
@@ -334,6 +333,7 @@ def load_model_params(model, model_params):
         if hasattr(model, k):
             setattr(model, k, v)
     return model 
+
 
 def main():
 
@@ -410,11 +410,21 @@ def main():
     else:
         policy_kwargs = dict(
             features_extractor_class=LuxNet,
-            features_extractor_kwargs=dict(features_dim=env.action_space.n),
+            features_extractor_kwargs=dict(features_dim=128),
         )
         # Attach a ML model from stable_baselines3 and train a RL model
-        model = PPO("CnnPolicy", env, policy_kwargs=policy_kwargs, **model_params)
+        pretrained_path = "../exp030/bc_policy"
+        bc_trainer = bc.reconstruct_policy(pretrained_path)
+        class CopyPolicy(ActorCriticCnnPolicy):
+            def __new__(cls, *args, **kwargs):
+                return bc_trainer
+        # model = PPO('CnnPolicy', env, policy_kwargs=policy_kwargs, **model_params)
+          
+        model = PPO(CopyPolicy, env, **model_params)
+        # model.policy = policy
+        model.save('./tmp_model')
 
+    sys.exit()
     #############
     #  callback
     #############
@@ -428,7 +438,7 @@ def main():
     # An evaluation environment is needed to measure multi-env setups. Use a fixed 4 envs.
     opponents = {"imitation": ImitationAgent()}  # for eval opponent
     env_eval = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
-                                                    learning_agent=AgentPolicy(mode="train", n_stack=n_stack),
+                                                    learning_agent=AgentPolicy(mode="inference", model=model, n_stack=n_stack),
                                                     opponent_agents=opponents), i) for i in range(1)])
     callbacks.append(CustomEvalCallback(env_eval, **eval_params))
     ###########

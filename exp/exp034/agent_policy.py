@@ -102,7 +102,6 @@ def smart_transfer_to_nearby(game, team, unit_id, unit, target_type_restriction=
     return TransferAction(team, unit_id, target_unit_id, resource_type, resource_amount)
 
 
-# Neural Network for Lux AI
 class BasicConv2d(nn.Module):
     def __init__(self, input_dim, output_dim, kernel_size, bn):
         super().__init__()
@@ -118,31 +117,25 @@ class BasicConv2d(nn.Module):
         h = self.bn(h) if self.bn is not None else h
         return h
 
+    
 class LuxNet(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim):
         super(LuxNet, self).__init__(observation_space, features_dim)
         layers, filters = 6, 32
         self.n_obs_channel = observation_space.shape[0]
         self.conv0 = BasicConv2d(self.n_obs_channel, filters, (3, 3), False)
-        self.num_actions = features_dim
         self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
-
-        self.head_p = nn.Linear(filters, self.num_actions, bias=False)
-        # self.head_v = nn.Linear(filters*2, 1, bias=False)  # for value(reward)
+        self.head = nn.Linear(filters, features_dim, bias=False)
 
     def forward(self, x):
         h = F.relu_(self.conv0(x))
         for block in self.blocks:
             h = F.relu_(h + block(h))
-        # h = (batch, c, w, h) -> (batch, c) 
-        # h:(64,32,32,32)
-        h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # h=head: (64, 32)
-        # h_avg = h.view(h.size(0), h.size(1), -1).mean(-1)  # h_avg: (64, 32)
-        p = self.head_p(h_head)  # policy
-        # v = torch.tanh(self.head_v(torch.cat([h_head, h_avg], dim=1)))  # value
-        return p # , v.squeeze(dim=1)
+        h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # (filter)
+        output = self.head(h_head)  # filter -> features_dim
+        return output 
 
-########################################################################################################################
+
 # This is the Agent that you need to design for the competition
 ########################################################################################################################
 class AgentPolicy(AgentWithModel):
@@ -280,7 +273,8 @@ class AgentPolicy(AgentWithModel):
         for unit in units:
             if unit.can_act():
                 obs = self.get_observation(game, unit, None, unit.team, new_turn, base_obs)
-                action_code, _states = self.model.predict(obs, deterministic=False)
+                # action_code, _states = self.model.predict(obs, deterministic=False)
+                action_code, _states = self.model.predict(obs, deterministic=True)
                 if action_code is not None:
                     actions.append(
                         self.action_code_to_action(action_code, game=game, unit=unit, city_tile=None, team=unit.team))
@@ -337,38 +331,7 @@ class AgentPolicy(AgentWithModel):
 
     def get_base_observation(self, game, team, last_unit_obs):
         """
-         Implements getting a observation from the current game for this unit or city
-         0ch: target unit pos
-         1ch: target unit resource
-
-         2ch: own unit pos
-         3ch: own unit cooldown
-         4ch: own unit resource
-         5ch: opponent unit pos
-         6ch: opponent unit cooldown
-         7ch: opponent unit resource
-
-         8ch: own citytile pos
-         9ch: own citytile fuel_ratio
-        10ch: own citytile cooldown
-        11ch: opponent citytile pos
-        12ch: opponent citytile fuel_ratio
-        13ch: opponent citytile cooldown
-
-        14ch: wood
-        15ch: coal
-        16ch: uranium
-
-        17ch: own research points
-        18ch: opponent research points
-        19ch: road level
-        20ch: cycle
-        21ch: turn 
-        22ch: map
-
-        for stack
-        23ch: own unit pos before 1step
-        24ch: opoonent unit pos before 1step
+        Implements getting a observation from the current game for this unit or city
         """
 
         height = game.map.height
@@ -377,35 +340,25 @@ class AgentPolicy(AgentWithModel):
         x_shift = (32 - width) // 2
         y_shift = (32 - height) // 2
 
-        b = np.zeros((self._n_obs_channel, 32, 32), dtype=np.float32)
+        b = np.zeros((self.n_obs_channel, 32, 32), dtype=np.float32)
         opponent_team = 1 - team
-        # target unit
-        # if unit is not None:
-        #     x = unit.pos.x + x_shift
-        #     y = unit.pos.y + y_shift
-        #     cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
-        #     resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
-        #     b[:2, x,y] = (1, resource)
-    
+        
         # unit
         for _unit in game.state["teamStates"][team]["units"].values():
-            # if unit is not None:
-                # if _unit.id == unit.id:
-                #     continue
             x = _unit.pos.x + x_shift
             y = _unit.pos.y + y_shift
             cooldown = _unit.cooldown / 6
             cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
             resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-            b[2:5, x,y] = (1, cooldown, resource)
-    
+            b[2:5, x,y] += (1, cooldown, resource)
+
         for _unit in game.state["teamStates"][opponent_team]["units"].values():
             x = _unit.pos.x + x_shift
             y = _unit.pos.y + y_shift
             cooldown = _unit.cooldown / 6
             cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"] 
             resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
-            b[5:8, x,y] = (1, cooldown, resource)
+            b[5:8, x,y] += (1, cooldown, resource)
 
         # city tile
         for city in game.cities.values():
@@ -417,13 +370,6 @@ class AgentPolicy(AgentWithModel):
                 x = cell.pos.x + x_shift
                 y = cell.pos.y + y_shift
                 cooldown = cell.city_tile.cooldown / max_cooldown
-
-                # target city_tile
-                # if city_tile is not None:
-                #     if (cell.city_tile.pos.x == city_tile.pos.x)&(cell.city_tile.pos.y == city_tile.pos.y):
-                #         b[8:10, x, y] = (1, fuel_ratio)
-                        # continue 
-                
                 if city.team == team:
                     b[8:11, x, y] = (1, fuel_ratio, cooldown)
                 else:
@@ -464,84 +410,34 @@ class AgentPolicy(AgentWithModel):
             additional_obs = np.concatenate(last_unit_obs, axis=0)
             b = np.concatenate([b, additional_obs], axis=0)
 
-        assert np.sum(b > 1) == 0
         assert b.shape == self.observation_space.shape
-        return b
+        return b 
 
-
-    def get_observation(self, game, unit, city_tile, team, is_new_turn, base_obs):
+    def get_observation(self, game, unit, citytile, team, new_turn, base_state):
         """
-         Implements getting a observation from the current game for this unit or city
-         0ch: target unit pos
-         1ch: target unit resource
-
-         2ch: own unit pos
-         3ch: own unit cooldown
-         4ch: own unit resource
-         5ch: opponent unit pos
-         6ch: opponent unit cooldown
-         7ch: opponent unit resource
-
-         8ch: target citytile pos
-         9ch: target citytile fuel_ratio
-
-        10ch: own citytile pos
-        11ch: own citytile fuel_ratio
-        12ch: own citytile cooldown
-        13ch: opponent citytile pos
-        14ch: opponent citytile fuel_ratio
-        15ch: opponent citytile cooldown
-
-        16ch: wood
-        17ch: coal
-        18ch: uranium
-
-        19ch: own research points
-        20ch: opponent research points
-        21ch: road level
-        22ch: cycle
-        23ch: turn 
-        24ch: map
-
-        25ch: own unit pos before 1step
-        26ch: opoonent unit pos before 1step
-        27ch: own unit pos before 2step
-        28ch: opoonent unit pos before 2step
-        29ch: own unit pos before 3step
-        30ch: opoonent unit pos before 3step
+        Implements getting a observation from the current game for this unit or city
         """
-        b = base_obs.copy()
+
         height = game.map.height
         width = game.map.width
 
         x_shift = (32 - width) // 2
         y_shift = (32 - height) // 2
 
-        opponent_team = 1 - team
+        b = base_state.copy()
+        
         # target unit
         if unit is not None:
             x = unit.pos.x + x_shift
             y = unit.pos.y + y_shift
+            max_cooldown = GAME_CONSTANTS["PARAMETERS"]["CITY_ACTION_COOLDOWN"]
             cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"]
-            resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap
-            b[:2, x,y] = (1, resource)
+            cooldown = np.array(unit.cooldown / max_cooldown, dtype=np.float32)
+            resource = np.array((unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / cap, dtype=np.float32)
+            b[:2, x, y] = (1, resource)
+            b[2:5, x, y] -= (1, cooldown, resource)
 
-
-        # target city_tile
-        # if city_tile is not None:
-        #     city = game.cities[city_tile.city_id]
-        #     fuel = city.fuel
-        #     lightupkeep = city.get_light_upkeep()
-        #     max_cooldown = GAME_CONSTANTS["PARAMETERS"]["CITY_ACTION_COOLDOWN"]
-        #     fuel_ratio = min(fuel / lightupkeep, max_cooldown) / max_cooldown
-        #     x = city_tile.pos.x
-        #     y = city_tile.pos.y
-        #     b[8:10, x, y] = (1, fuel_ratio)
-
-        assert np.sum(b > 1) == 0
-        assert b.shape == self.observation_space.shape
-        return b
-
+        return b 
 
     def get_reward(self, game, is_game_finished, is_new_turn, is_game_error):
         """
