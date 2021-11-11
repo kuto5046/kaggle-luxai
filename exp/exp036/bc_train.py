@@ -328,13 +328,13 @@ def horizontal_flip(state, action):
     return state, action
 
 class LuxDataset(Dataset):
-    def __init__(self, df, data_dir, n_obs_channel, phase):
+    def __init__(self, df, data_dir, n_obs_channel=23, n_stack=1, phase="train"):
         self.actions = df['action'].to_numpy()
         self.obs_ids = df['obs_id'].to_numpy()
         self.unit_ids = df['unit_id'].to_numpy()
         self.data_dir = data_dir 
         self.n_obs_channel = n_obs_channel
-        self.n_stack = 1
+        self.n_stack = n_stack
         self.phase = phase
         
     def __len__(self):
@@ -362,9 +362,9 @@ class LuxDataset(Dataset):
         assert state.shape[0] == self.n_obs_channel + 8*(self.n_stack-1)
 
         if self.phase == 'train':
-            if random.random() > 0.5:
+            if random.random() < 0.3:
                 state, action = horizontal_flip(state, action)
-            if random.random() > 0.5:
+            if random.random() < 0.3:
                 state, action = vertical_flip(state, action)  
 
         return {'obs':state, 'acts':action}
@@ -456,19 +456,20 @@ def main():
         print(f"{unit_action_names[action]}:{len(_df)}")
 
     action_space = spaces.Discrete(7)
-    n_obs_channel = 23
+    _n_obs_channel = 23
+    n_obs_channel = _n_obs_channel + 8*(n_stack-1)
     observation_space = spaces.Box(low=0, high=1, shape=(n_obs_channel, 32, 32), dtype=np.float16)
 
     train_df, val_df = train_test_split(df, test_size=0.1, random_state=seed, stratify=df["action"])
     train_loader = DataLoader(
-        LuxDataset(train_df, data_dir, n_obs_channel, phase="train"), 
+        LuxDataset(train_df, data_dir, _n_obs_channel, n_stack, phase="train"), 
         batch_size=batch_size,
         shuffle=True, 
         drop_last=True, 
         num_workers=24
     )
     val_loader = DataLoader(
-        LuxDataset(val_df, data_dir, n_obs_channel, phase='val'), 
+        LuxDataset(val_df, data_dir, _n_obs_channel, n_stack, phase='val'), 
         batch_size=batch_size, 
         shuffle=False, 
         num_workers=24
@@ -479,8 +480,8 @@ def main():
             observation_space=observation_space, 
             action_space=action_space, 
             lr_schedule=ConstantLRSchedule(torch.finfo(torch.float32).max),
-            # optimizer_class=torch.optim.AdamW,
-            # optimizer_kwargs={"lr":1e-3},
+            optimizer_class=torch.optim.AdamW,
+            # optimizer_kwargs={"lr":1e-5},
             features_extractor_class=LuxNet,
             features_extractor_kwargs=dict(features_dim=128)
             )
@@ -492,7 +493,7 @@ def main():
             batch_size=batch_size,
             demonstrations=train_loader,
             optimizer_cls=torch.optim.AdamW,
-            optimizer_kwargs={"lr":1e-3},
+            optimizer_kwargs={"lr":2e-3},
             custom_logger=bc_logger
         )
 
