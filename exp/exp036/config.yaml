@@ -3,7 +3,7 @@ basic:
   run_id: None  # faithful-thunder-392  # run id in wandb
   debug: False
   method: BC
-  batch_size: 64
+  batch_size: 2048
   n_stack: 1
   n_envs: 1
 
