@@ -403,7 +403,7 @@ class ImitationAgent(Agent):
 
 
 # Input for Neural Network
-def make_input(obs, unit_id, n_obs_channel):
+def make_input(obs, unit_id, tile_pos, n_obs_channel):
     width, height = obs['width'], obs['height']
 
     # mapのサイズを調整するためにshiftするマス数
@@ -449,12 +449,16 @@ def make_input(obs, unit_id, n_obs_channel):
             x = int(strs[3]) + x_shift
             y = int(strs[4]) + y_shift
             cooldown = int(strs[5])
-            idx = 8 + (team - obs['player']) % 2 * 3
-            b[idx:idx + 3, x, y] = (
-                1,
-                cities[city_id],
-                cooldown / 10
-            )
+            if tile_pos is not None:
+                if tile_pos == (int(strs[3]), int(strs[4])):
+                    b[23:25,x,y] = (1, cities[city_id])
+            else:
+                idx = 8 + (team - obs['player']) % 2 * 3
+                b[idx:idx + 3, x, y] = (
+                    1,
+                    cities[city_id],
+                    cooldown / 10
+                )
         elif input_identifier == 'r':
             # Resources
             r_type = strs[1]

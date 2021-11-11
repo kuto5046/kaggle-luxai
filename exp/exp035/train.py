@@ -56,7 +56,7 @@ def seed_everything(seed: int = 42):
     torch.backends.cudnn.deterministic = True  # type: ignore
     torch.backends.cudnn.benchmark = False  # type: ignore
 
-def to_label(action):
+def _to_label(action):
     """action記号をラベルに変換する関数
     扱っているのはunit系のactionのみでcity系のactionはNone扱い？
     unit系のactionにはtransferやpillageも含まれるがそれらのラベルはNone扱い？
@@ -87,29 +87,52 @@ def to_label(action):
         label = None
     return unit_id, label
 
+def to_label(action):
+    """action記号をラベルに変換する関数
+    扱っているのはunit系のactionのみでcity系のactionはNone扱い？
+    unit系のactionにはtransferやpillageも含まれるがそれらのラベルはNone扱い？
 
-# def to_label(action):
-#     unit_id = None
-#     pos = None
-#     label = None 
-#     strs = action.split(' ')
-#     if strs[0] in ['m', 't', 'bcity']:
-#         unit_id = strs[1]
-#         if strs[0] == 'm':
-#             label_dict = {'c': 0, 'n': 1, 'w': 2, 's': 3, 'e': 4}
-#             label = label_dict[strs[2]]
-#         elif strs[0] == 't':
-#             label = 5
-#         elif strs[0] == 'bcity':
-#             label = 6
+    Args:
+        action (list): [description]
 
-#     elif strs[0] in ['r', 'bw']:
-#         pos = (strs[1], strs[2])
-#         if strs[0] == 'r':
-#             label = 0
-#         elif strs[1] == 'bw':
-#             label = 1
-#     return unit_id, label, pos
+    Returns:
+        [type]: [description]
+    
+    ex)
+    input: action=['m u_1 w']
+    strs = ['m', 'u_1', 'w']
+    strs[0] - action
+    strs[1] - unit_id
+    strs[2] - direction(if action is 'm')
+    """
+    label = None 
+    tile_pos = None 
+    unit_id = None 
+    is_unit = None 
+
+    strs = action.split(' ')
+    if strs[0] in ["m", "t", "bcity"]:
+        is_unit = 1
+        unit_id = strs[1]
+        if strs[0] == 'm':
+            label_dict = {'c': 0, 'n': 1, 'w': 2, 's': 3, 'e': 4}
+            label = label_dict[strs[2]]
+        elif strs[0] == 't':
+            label = 5
+        elif strs[0] == 'bcity':
+            label = 6
+    
+    elif strs[0] in ["r", "bw"]:
+        is_unit = 0
+        x = int(strs[1])
+        y = int(strs[2])
+        tile_pos = (x,y)
+        if strs[0] == "bw":
+            label = 0
+        elif strs[0] == "r":
+            label = 1
+
+    return label, unit_id, tile_pos, is_unit
  
 def depleted_resources(obs):
     for u in obs['updates']:
@@ -142,6 +165,8 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
     labels = []
     obs_ids = []
     unit_ids = []
+    tile_poses = []
+    is_units = []
 
     os.makedirs(data_dir, exist_ok=True)
     non_actions_count = 0
@@ -207,16 +232,20 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
                     pickle.dump(obs, f)
                 for action in actions:
                     # moveとbuild cityのaction labelのみが取得される?
-                    unit_id, label = to_label(action)
+                    label, unit_id, tile_pos, is_unit = to_label(action)
                     if label is not None:
                         labels.append(label)
                         obs_ids.append(obs_id)
                         unit_ids.append(unit_id)
+                        tile_poses.append(tile_pos)
+                        is_units.append(is_unit)
 
     df = pd.DataFrame()
     df['label'] = labels
     df['obs_id'] = obs_ids
     df['unit_id'] = unit_ids
+    df['tile_pos'] = tile_poses
+    df['is_unit'] = is_units 
     df.to_csv(data_dir + 'data.csv', index=False)
     logger.info(f"空のactionsの数: {non_actions_count}")
     return df
@@ -256,6 +285,8 @@ class LuxDataset(Dataset):
         self.labels = df['label'].to_numpy()
         self.obs_ids = df['obs_id'].to_numpy()
         self.unit_ids = df['unit_id'].to_numpy()
+        self.tile_poses = df['tile_pos'].to_numpy()
+        self.is_units = df["is_unit"].to_numpy()
         self.data_dir = data_dir 
         self.n_obs_channel = n_obs_channel
         self.phase = phase
@@ -267,19 +298,20 @@ class LuxDataset(Dataset):
         action = self.labels[idx]
         obs_id = self.obs_ids[idx]
         unit_id = self.unit_ids[idx]
+        tile_pos = self.tile_poses[idx]
+        is_unit = self.is_units[idx]
         with open(self.data_dir + f"{obs_id}.pickle", mode="rb") as f:    
             obs = pickle.load(f)
-        state = make_input(obs, unit_id, self.n_obs_channel)  
+        state = make_input(obs, unit_id, tile_pos, self.n_obs_channel)  
 
         if self.phase == 'train':
-            
             if random.random() > 0.5:
                 state, action = horizontal_flip(state, action)
 
             if random.random() > 0.5:
                 state, action = vertical_flip(state, action)  
 
-        return state, action
+        return state, action, is_unit
 
 
 def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, scheduler=None, num_epochs=2):
@@ -296,12 +328,16 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
                 
             epoch_ploss = 0.0
             epoch_vloss = 0.0
+            unit_epoch_acc = 0
+            city_epoch_acc = 0
             epoch_acc = 0
-            
+            unit_data_size = 0
+            city_data_size = 0
             dataloader = dataloaders_dict[phase]
             for item in tqdm(dataloader, leave=False):
                 states = item[0].cuda().float()
                 actions = item[1].cuda().long()
+                is_units = item[2]
                 # rewards = item[2].cuda().float()
 
                 optimizer.zero_grad()
@@ -321,19 +357,28 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
                     batch_size = len(policy)
                     epoch_ploss += policy_loss.item() * batch_size
                     # epoch_vloss += value_loss.item() * batch_size
-                    epoch_acc += torch.sum(preds == actions.data)
+                    unit_mask = (is_units == 1).float()  # unitのみ取り出す
+                    city_mask = (is_units == 0).float()  # cityのみ取り出す
+                    num_correct = (preds.cpu() == actions.data.cpu())
+                    unit_epoch_acc += torch.sum(unit_mask * num_correct)
+                    city_epoch_acc += torch.sum(city_mask * num_correct)
+                    epoch_acc += torch.sum(num_correct)
+
+                    unit_data_size += torch.sum(unit_mask)
+                    city_data_size += torch.sum(city_mask)
 
             data_size = len(dataloader.dataset)
+            assert data_size == unit_data_size + city_data_size, f"all:{data_size}, unit:{unit_data_size}, city:{city_data_size}"
             epoch_ploss = epoch_ploss / data_size
             # epoch_vloss = epoch_vloss / data_size
+            unit_epoch_acc = unit_epoch_acc.double() / unit_data_size
+            city_epoch_acc = city_epoch_acc.double() / city_data_size
             epoch_acc = epoch_acc.double() / data_size
             if phase == 'train':
-                wandb.log({'Loss/policy': epoch_ploss, 'ACC/val': epoch_acc})
-                logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Acc: {epoch_acc:.4f}')
+                wandb.log({'Loss/train': epoch_ploss, 'ACC/train-unit': unit_epoch_acc, 'ACC/train-city': city_epoch_acc, 'ACC/train': epoch_acc})
+                logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Acc: {epoch_acc:.4f} (unit:{unit_epoch_acc:.4f}/city{city_epoch_acc:.4f})')
             elif phase=='val':
-                # wandb.log({'Loss/policy': epoch_ploss, 'Loss/value':epoch_vloss, 'ACC/val': epoch_acc})
-                # logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Loss(value): {epoch_vloss:.4f} | Acc: {epoch_acc:.4f}')
-                wandb.log({'Loss/policy': epoch_ploss, 'ACC/val': epoch_acc})
+                wandb.log({'Loss/val': epoch_ploss, 'ACC/val-unit': unit_epoch_acc, 'ACC/val-city': city_epoch_acc, 'ACC/val': epoch_acc})
                 logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Acc: {epoch_acc:.4f}')
         
         if epoch_acc > best_acc:
@@ -357,10 +402,10 @@ def main():
 
     labels = df['label'].to_numpy()
     actions = ['center', 'north', 'west', 'south', 'east', 'transfer', 'bcity']
-    for value, count in zip(*np.unique(labels, return_counts=True)):
-        logger.info(f'{actions[value]:^5}: {count:>3}')
+    # for value, count in zip(*np.unique(labels, return_counts=True)):
+    #     logger.info(f'{actions[value]:^5}: {count:>3}')
     
-    n_obs_channel = 23
+    n_obs_channel = 25
     observation_space = spaces.Box(low=0, high=1, shape=(n_obs_channel, 32, 32), dtype=np.float16)
     model = LuxNet(observation_space=observation_space, features_dim=len(actions))
     train_df, val_df = train_test_split(df, test_size=0.1, random_state=seed, stratify=labels)
