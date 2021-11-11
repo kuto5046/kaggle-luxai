@@ -479,9 +479,8 @@ def main():
         policy = policies.ActorCriticCnnPolicy(
             observation_space=observation_space, 
             action_space=action_space, 
-            lr_schedule=ConstantLRSchedule(torch.finfo(torch.float32).max),
+            lr_schedule=ConstantLRSchedule(lr=1e-3),
             optimizer_class=torch.optim.AdamW,
-            # optimizer_kwargs={"lr":1e-5},
             features_extractor_class=LuxNet,
             features_extractor_kwargs=dict(features_dim=128)
             )
