@@ -222,6 +222,35 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
     return df
 
 
+def vertical_flip(state, action):
+    """
+    swap north(=1) and south(=3)
+    """
+    # flip up/down
+    state = state.transpose(2,1,0)  #(c,x,y) -> (y,x,c)
+    state = np.flipud(state).copy()
+    if action == 1:
+        action = 3
+    elif action == 3:
+        action = 1
+    state = state.transpose(2,1,0)  # (w,h,c) -> (c,w,h)
+    return state, action
+
+def horizontal_flip(state, action):
+    """
+    swap west(=2) and east(=4)
+    """
+    # flip left/right
+    state = state.transpose(2,1,0)  #(x,y,c) -> (y,x,c)
+    state = np.fliplr(state).copy()
+    if action == 4:
+        action = 2
+    elif action == 2:
+        action = 4
+    state = state.transpose(2,1,0)  # (w,h,c) -> (c,w,h)
+    return state, action
+
+
 class LuxDataset(Dataset):
     def __init__(self, df, data_dir, n_obs_channel, phase):
         self.labels = df['label'].to_numpy()
@@ -243,24 +272,12 @@ class LuxDataset(Dataset):
         state = make_input(obs, unit_id, self.n_obs_channel)  
 
         if self.phase == 'train':
-            state = state.transpose(1,2,0) # (c,w,h) -> (w,h,c)
             
-            # flip left/right
-            if torch.rand(1) > 0.5:
-                state = np.fliplr(state).copy()
-                if action == 1:
-                    action = 3
-                elif action == 3:
-                    action = 1
+            if random.random() > 0.5:
+                state, action = horizontal_flip(state, action)
 
-            # flip up/down
-            if torch.rand(1) > 0.5:
-                state = np.flipud(state).copy()
-                if action == 4:
-                    action = 2
-                elif action == 2:
-                    action = 4
-            state = state.transpose(2,0,1)  # (w,h,c) -> (c,w,h)
+            if random.random() > 0.5:
+                state, action = vertical_flip(state, action)  
 
         return state, action
 
@@ -367,7 +384,7 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     # scheduler = CosineAnnealingLR(optimizer, T_max=10)
 
-    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, num_epochs=20)
+    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, num_epochs=2)
     wandb.finish()
     shutil.rmtree(data_dir)
 
