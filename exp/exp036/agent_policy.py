@@ -116,14 +116,24 @@ class LuxNet(BaseFeaturesExtractor):
         self.n_obs_channel = observation_space.shape[0]
         self.conv0 = BasicConv2d(self.n_obs_channel, filters, (3, 3), False)
         self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
-        self.head = nn.Linear(filters, features_dim, bias=False)
+        # self.head = nn.Linear(filters, features_dim, bias=False)
+
+        # Compute shape by doing one forward pass
+        with torch.no_grad():
+            x = torch.as_tensor(observation_space.sample()[None]).float()
+            h = F.relu_(self.conv0(x))
+            for block in self.blocks:
+                h = F.relu_(h + block(h))
+            n_flatten =  torch.flatten(h).shape[0]
+        self.head = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
 
     def forward(self, x):
         h = F.relu_(self.conv0(x))
         for block in self.blocks:
             h = F.relu_(h + block(h))
-        h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # (filter)
-        output = self.head(h_head)  # filter -> features_dim
+        # h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # (filter)
+        output = self.head(h.flatten())
+        # output = self.head(h_head)  # filter -> features_dim
         return output 
  
 

@@ -16,5 +16,5 @@ trajectory:
 BC:
   trainer_params:
     n_epochs: 10
-    log_interval: 1000
+    log_interval: 100
     reset_tensorboard: True

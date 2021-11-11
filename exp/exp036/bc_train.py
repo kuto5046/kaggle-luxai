@@ -246,6 +246,59 @@ def make_input(obs, unit_id, n_obs_channel):
 
     return b
 
+# Input for Neural Network
+def make_last_input(obs):
+    width, height = obs['width'], obs['height']
+
+    # mapのサイズを調整するためにshiftするマス数
+    # width=20の場合は6 width=21の場合5
+    x_shift = (32 - width) // 2
+    y_shift = (32 - height) // 2
+    cities = {}
+    
+    # (c, w, h)
+    # mapの最大サイズが(32,32)なのでそれに合わせている
+    b = np.zeros((8, 32, 32), dtype=np.float32)
+    
+    for update in obs['updates']:
+        strs = update.split(' ')
+        input_identifier = strs[0]
+
+        if input_identifier == 'u':
+            x = int(strs[4]) + x_shift
+            y = int(strs[5]) + y_shift
+            wood = int(strs[7])
+            coal = int(strs[8])
+            uranium = int(strs[9])
+            # Units
+            team = int(strs[2])
+            cooldown = float(strs[6])
+            idx = 0 + (team - obs['player']) % 2 * 2
+            b[idx:idx + 2, x, y] += (
+                1,
+                (wood + coal + uranium) / 2000
+            )
+        elif input_identifier == 'ct':
+            # CityTiles
+            team = int(strs[1])
+            city_id = strs[2]
+            x = int(strs[3]) + x_shift
+            y = int(strs[4]) + y_shift
+            cooldown = int(strs[5])
+            idx = 4 + (team - obs['player']) % 2 * 2
+            b[idx:idx + 2, x, y] = (
+                1,
+                cities[city_id],
+            )
+
+        elif input_identifier == 'c':
+            # Cities
+            city_id = strs[2]
+            fuel = float(strs[3])
+            lightupkeep = float(strs[4])
+            cities[city_id] = min(fuel / lightupkeep, 10) / 10
+    return b
+
 def vertical_flip(state, action):
     """
     swap north(=1) and south(=3)
@@ -281,6 +334,7 @@ class LuxDataset(Dataset):
         self.unit_ids = df['unit_id'].to_numpy()
         self.data_dir = data_dir 
         self.n_obs_channel = n_obs_channel
+        self.n_stack = 1
         self.phase = phase
         
     def __len__(self):
@@ -290,10 +344,20 @@ class LuxDataset(Dataset):
         action = self.actions[idx]
         obs_id = self.obs_ids[idx]
         unit_id = self.unit_ids[idx]
+
+        ep_id = obs_id.split("_")[0]
+        step = int(obs_id.split("_")[1])
         with open(self.data_dir + f"{obs_id}.pickle", mode="rb") as f:    
             obs = pickle.load(f)
         state = make_input(obs, unit_id, self.n_obs_channel)
 
+        # for i in range(1, self.n_stack):
+        #     if os.path.exists(self.data_dir + f"{ep_id}_{step-i}.pickle"):
+        #         with open(self.data_dir + f"{ep_id}_{step-i}.pickle", mode="rb") as f:    
+        #             last_obs = pickle.load(f)
+        #         last_state = make_last_input(last_obs)
+        #         state = np.concatenate([state, last_state], axis=0)
+        # assert state.shape[0] == self.n_obs_channel + 2*(self.n_stack-1)
         if self.phase == 'train':
             if random.random() > 0.5:
                 state, action = horizontal_flip(state, action)
@@ -398,13 +462,13 @@ def main():
         batch_size=batch_size,
         shuffle=True, 
         drop_last=True, 
-        num_workers=4
+        num_workers=12
     )
     val_loader = DataLoader(
         LuxDataset(val_df, data_dir, n_obs_channel, phase='val'), 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=4
+        num_workers=12
     )
     if method == "BC":
         bc_logger = logger.configure(folder="./logs/", format_strs=["stdout", "tensorboard"])
