@@ -351,13 +351,16 @@ class LuxDataset(Dataset):
             obs = pickle.load(f)
         state = make_input(obs, unit_id, self.n_obs_channel)
 
-        # for i in range(1, self.n_stack):
-        #     if os.path.exists(self.data_dir + f"{ep_id}_{step-i}.pickle"):
-        #         with open(self.data_dir + f"{ep_id}_{step-i}.pickle", mode="rb") as f:    
-        #             last_obs = pickle.load(f)
-        #         last_state = make_last_input(last_obs)
-        #         state = np.concatenate([state, last_state], axis=0)
-        # assert state.shape[0] == self.n_obs_channel + 2*(self.n_stack-1)
+        for i in range(1, self.n_stack):
+            if os.path.exists(self.data_dir + f"{ep_id}_{step-i}.pickle"):
+                with open(self.data_dir + f"{ep_id}_{step-i}.pickle", mode="rb") as f:    
+                    last_obs = pickle.load(f)
+                last_state = make_last_input(last_obs)
+            else:
+                last_state = np.zeros((8, 32, 32), dtype=np.float32)
+            state = np.concatenate([state, last_state], axis=0)
+        assert state.shape[0] == self.n_obs_channel + 8*(self.n_stack-1)
+
         if self.phase == 'train':
             if random.random() > 0.5:
                 state, action = horizontal_flip(state, action)
@@ -462,13 +465,13 @@ def main():
         batch_size=batch_size,
         shuffle=True, 
         drop_last=True, 
-        num_workers=12
+        num_workers=24
     )
     val_loader = DataLoader(
         LuxDataset(val_df, data_dir, n_obs_channel, phase='val'), 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=12
+        num_workers=24
     )
     if method == "BC":
         bc_logger = logger.configure(folder="./logs/", format_strs=["stdout", "tensorboard"])
