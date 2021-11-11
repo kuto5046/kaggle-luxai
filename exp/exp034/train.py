@@ -422,9 +422,9 @@ def main():
           
         model = PPO(CopyPolicy, env, **model_params)
         # model.policy = policy
-        model.save('./tmp_model')
+        # model.save('./tmp_model')
 
-    sys.exit()
+    # sys.exit()
     #############
     #  callback
     #############
@@ -440,7 +440,7 @@ def main():
     env_eval = SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
                                                     learning_agent=AgentPolicy(mode="inference", model=model, n_stack=n_stack),
                                                     opponent_agents=opponents), i) for i in range(1)])
-    callbacks.append(CustomEvalCallback(env_eval, **eval_params))
+    # callbacks.append(CustomEvalCallback(env_eval, **eval_params))
     ###########
     # train
     ###########

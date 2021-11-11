@@ -139,7 +139,6 @@ class LuxNet(nn.Module):
         return p, v.squeeze(dim=1)
 
 
-
 class ImitationAgent(Agent):
     def __init__(self) -> None:
         """
@@ -148,7 +147,9 @@ class ImitationAgent(Agent):
         self.team = None
         self.match_controller = None
         self.model = LuxNet(num_actions=7, n_obs_channel=23)
-        path = "/work/agents/imitation/_best.pth"
+
+        root_path = '/kaggle/input/' if os.path.exists('/kaggle/input/') else '/work/'
+        path = root_path + "agents/imitation/_best.pth"
         self.model.load_state_dict(torch.load(path))
         # path = "agents/imitation"
         # self.model = torch.jit.load(f'{path}/best.pth')

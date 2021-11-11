@@ -39,7 +39,8 @@ from imitation.util import logger, util
 
 sys.path.append("../../LuxPythonEnvGym")
 from luxai2021.env.agent import Agent
-from luxai2021.env.lux_env import LuxEnvironment
+from luxai2021.env.lux_env import (LuxEnvironment, SaveReplayAndModelCallback,
+                                   CustomEnvWrapper)
 from luxai2021.game.constants import LuxMatchConfigs_Default, LuxMatchConfigs_Replay
 from luxai2021.game.game import Game
 
@@ -54,6 +55,23 @@ def seed_everything(seed: int = 42):
     torch.backends.cudnn.benchmark = False  # type: ignore
 
 
+# https://stable-baselines3.readthedocs.io/en/master/guide/examples.html?highlight=SubprocVecEnv#multiprocessing-unleashing-the-power-of-vectorized-environments
+def make_env(local_env, rank, seed=0):
+    """
+    Utility function for multi-processed env.
+
+    :param local_env: (LuxEnvironment) the environment 
+    :param seed: (int) the initial seed for RNG
+    :param rank: (int) index of the subprocess
+    """
+
+    def _init():
+        local_env.seed(seed + rank)
+        return CustomEnvWrapper(local_env)
+
+    set_random_seed(seed)
+    return _init
+
 def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', only_win=False): 
     print(f"Team: {team_name}")
     labels = []
@@ -63,7 +81,7 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
     os.makedirs(data_dir, exist_ok=True)
     non_actions_count = 0
     episodes = [path for path in Path(episode_dir).glob('*.json') if 'output' not in path.name]
-
+    # episodes = episodes[:10]  # TODO 一時的なので削除
     submission_id_list = []
     latest_lb_list = []
     for filepath in episodes: 
@@ -305,8 +323,6 @@ def main():
     batch_size = config["basic"]["batch_size"]
     method = config["basic"]["method"]
     bc_trainer_params = config['BC']['trainer_params']
-    ckpt_params = config["callbacks"]["checkpoints"]
-    # model_params = config["model"]["params"]
     
     seed_everything(seed)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
@@ -329,7 +345,6 @@ def main():
         monitor_gym=False,  # auto-upload the videos of agents playing the game
         save_code=False,  # optional
     )
-
 
     df = create_dataset_from_json(episode_dir, data_dir, only_win=False)
     print(f"obses:{df['obs_id'].nunique()} samples:{len(df)}")
@@ -373,6 +388,18 @@ def main():
         
         bc_trainer.train(**bc_trainer_params)
         bc_trainer.save_policy('bc_policy')
+
+        # BC -> RL model
+        # class CopyPolicy(policies.ActorCriticCnnPolicy):
+        #     # similar to __init__ but it returns the created object. its intended to be used for the creation of immutable objects.
+        #     def __new__(cls, *args, **kwargs):
+        #         return bc_trainer.policy
+
+        # env = SubprocVecEnv([make_env(LuxEnvironment(configs=LuxMatchConfigs_Default,
+        #                                             learning_agent=AgentPolicy(mode="train", n_stack=1),
+        #                                             opponent_agents={"self-play": AgentPolicy(mode="inference", n_stack=1)}), rank=0)])
+        # model = PPO(CopyPolicy, env, verbose=0)
+        # model.save(path=f"bc_policy.zip")
 
     # elif method == "GAIL":
     #     policy_kwargs = dict(
