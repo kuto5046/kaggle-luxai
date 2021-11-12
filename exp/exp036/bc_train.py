@@ -480,9 +480,10 @@ def main():
             observation_space=observation_space, 
             action_space=action_space, 
             lr_schedule=ConstantLRSchedule(lr=1e-3),
+            net_arch = [dict(pi=[64], vf=[64])],
             optimizer_class=torch.optim.AdamW,
             features_extractor_class=LuxNet,
-            features_extractor_kwargs=dict(features_dim=128)
+            features_extractor_kwargs=dict(features_dim=64)
             )
 
         bc_trainer = BC(

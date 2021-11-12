@@ -116,10 +116,6 @@ class LuxNet(BaseFeaturesExtractor):
         self.n_obs_channel = observation_space.shape[0]
         self.conv0 = BasicConv2d(self.n_obs_channel, filters, (3, 3), False)
         self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
-        # self.head = nn.Sequential(
-        #     nn.Linear(filters, features_dim, bias=False),
-        #     nn.ReLU()
-        # )
         self.head = nn.Linear(filters, features_dim, bias=False)
 
     def forward(self, x):
@@ -128,7 +124,7 @@ class LuxNet(BaseFeaturesExtractor):
             h = F.relu_(h + block(h))
         h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # (filter)
         output = self.head(h_head)  # filter -> features_dim
-        return output 
+        return output
 
 
 class AgentPolicy(AgentWithModel):
