@@ -147,12 +147,12 @@ class ImitationAgent(Agent):
         self.team = None
         self.match_controller = None
         self.actions_units = [
-            partial(MoveAction, direction=Constants.DIRECTIONS.CENTER),  # This is the do-nothing action
+            # partial(MoveAction, direction=Constants.DIRECTIONS.CENTER),  # This is the do-nothing action
             partial(MoveAction, direction=Constants.DIRECTIONS.NORTH),
             partial(MoveAction, direction=Constants.DIRECTIONS.WEST),
             partial(MoveAction, direction=Constants.DIRECTIONS.SOUTH),
             partial(MoveAction, direction=Constants.DIRECTIONS.EAST),
-            partial(smart_transfer_to_nearby, target_type_restriction=Constants.UNIT_TYPES.WORKER), # Transfer to nearby worker
+            # partial(smart_transfer_to_nearby, target_type_restriction=Constants.UNIT_TYPES.WORKER), # Transfer to nearby worker
             SpawnCityAction,
   
         ]
@@ -235,7 +235,7 @@ class ImitationAgent(Agent):
                             unit_count += 1
 
                         # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
-                        elif not game.state["teamStates"][team]["researched"]["uranium"]:
+                        elif game.state["teamStates"][team]["researchPoints"] < 200:
                             action = ResearchAction(team, x, y, None)
                             actions.append(action)
                             game.state["teamStates"][team]["researchPoints"] += 1
@@ -403,7 +403,7 @@ class ImitationAgent(Agent):
 
 
 # Input for Neural Network
-def make_input(obs, unit_id, tile_pos, n_obs_channel):
+def make_input(obs, unit_id, n_obs_channel):
     width, height = obs['width'], obs['height']
 
     # mapのサイズを調整するためにshiftするマス数
@@ -449,16 +449,12 @@ def make_input(obs, unit_id, tile_pos, n_obs_channel):
             x = int(strs[3]) + x_shift
             y = int(strs[4]) + y_shift
             cooldown = int(strs[5])
-            if tile_pos is not None:
-                if tile_pos == (int(strs[3]), int(strs[4])):
-                    b[23:25,x,y] = (1, cities[city_id])
-            else:
-                idx = 8 + (team - obs['player']) % 2 * 3
-                b[idx:idx + 3, x, y] = (
-                    1,
-                    cities[city_id],
-                    cooldown / 10
-                )
+            idx = 8 + (team - obs['player']) % 2 * 3
+            b[idx:idx + 3, x, y] = (
+                1,
+                cities[city_id],
+                cooldown / 10
+            )
         elif input_identifier == 'r':
             # Resources
             r_type = strs[1]

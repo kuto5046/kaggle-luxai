@@ -56,83 +56,69 @@ def seed_everything(seed: int = 42):
     torch.backends.cudnn.deterministic = True  # type: ignore
     torch.backends.cudnn.benchmark = False  # type: ignore
 
-def _to_label(action):
-    """action記号をラベルに変換する関数
-    扱っているのはunit系のactionのみでcity系のactionはNone扱い？
-    unit系のactionにはtransferやpillageも含まれるがそれらのラベルはNone扱い？
-
-    Args:
-        action (list): [description]
-
-    Returns:
-        [type]: [description]
-    
-    ex)
-    input: action=['m u_1 w']
-    strs = ['m', 'u_1', 'w']
-    strs[0] - action
-    strs[1] - unit_id
-    strs[2] - direction(if action is 'm')
-    """
+def to_label(action):
     strs = action.split(' ')
     unit_id = strs[1]
     if strs[0] == 'm':
-        label_dict = {'c': 0, 'n': 1, 'w': 2, 's': 3, 'e': 4}
+        label_dict = {'c': None, 'n': 0, 'w': 1, 's': 2, 'e': 3}
         label = label_dict[strs[2]]
-    elif strs[0] == 't':
-        label = 5
     elif strs[0] == 'bcity':
-        label = 6
+        label = 4
     else:
         label = None
-    return unit_id, label
+    return label, unit_id 
 
-def to_label(action):
-    """action記号をラベルに変換する関数
-    扱っているのはunit系のactionのみでcity系のactionはNone扱い？
-    unit系のactionにはtransferやpillageも含まれるがそれらのラベルはNone扱い？
-
-    Args:
-        action (list): [description]
-
-    Returns:
-        [type]: [description]
+# Input for Neural Network
+def make_last_input(obs):
+    width, height = obs['width'], obs['height']
+    # mapのサイズを調整するためにshiftするマス数
+    # width=20の場合は6 width=21の場合5
+    x_shift = (32 - width) // 2
+    y_shift = (32 - height) // 2
+    cities = {}
     
-    ex)
-    input: action=['m u_1 w']
-    strs = ['m', 'u_1', 'w']
-    strs[0] - action
-    strs[1] - unit_id
-    strs[2] - direction(if action is 'm')
-    """
-    label = None 
-    tile_pos = None 
-    unit_id = None 
-    is_unit = None 
-
-    strs = action.split(' ')
-    if strs[0] in ["m", "t", "bcity"]:
-        is_unit = 1
-        unit_id = strs[1]
-        if strs[0] == 'm':
-            label_dict = {'c': 0, 'n': 1, 'w': 2, 's': 3, 'e': 4}
-            label = label_dict[strs[2]]
-        elif strs[0] == 't':
-            label = 5
-        elif strs[0] == 'bcity':
-            label = 6
+    # (c, w, h)
+    # mapの最大サイズが(32,32)なのでそれに合わせている
+    b = np.zeros((8, 32, 32), dtype=np.float32)
     
-    elif strs[0] in ["r", "bw"]:
-        is_unit = 0
-        x = int(strs[1])
-        y = int(strs[2])
-        tile_pos = (x,y)
-        if strs[0] == "bw":
-            label = 0
-        elif strs[0] == "r":
-            label = 1
+    for update in obs['updates']:
+        strs = update.split(' ')
+        input_identifier = strs[0]
 
-    return label, unit_id, tile_pos, is_unit
+        if input_identifier == 'u':
+            x = int(strs[4]) + x_shift
+            y = int(strs[5]) + y_shift
+            wood = int(strs[7])
+            coal = int(strs[8])
+            uranium = int(strs[9])
+            # Units
+            team = int(strs[2])
+            cooldown = float(strs[6])
+            idx = 0 + (team - obs['player']) % 2 * 2
+            b[idx:idx + 2, x, y] += (
+                1,
+                (wood + coal + uranium) / 2000
+            )
+        elif input_identifier == 'ct':
+            # CityTiles
+            team = int(strs[1])
+            city_id = strs[2]
+            x = int(strs[3]) + x_shift
+            y = int(strs[4]) + y_shift
+            cooldown = int(strs[5])
+            idx = 4 + (team - obs['player']) % 2 * 2
+            b[idx:idx + 2, x, y] = (
+                1,
+                cities[city_id],
+            )
+
+        elif input_identifier == 'c':
+            # Cities
+            city_id = strs[2]
+            fuel = float(strs[3])
+            lightupkeep = float(strs[4])
+            cities[city_id] = min(fuel / lightupkeep, 10) / 10
+    return b
  
 def depleted_resources(obs):
     for u in obs['updates']:
@@ -140,33 +126,12 @@ def depleted_resources(obs):
             return False
     return True
 
-def get_reward(json_load, index):
-    """
-    WIN: 1
-    TIE: 0
-    LOSE: -1
-    """
-    rewards_list = np.array(json_load['rewards'])
-    rewards_list[np.where(rewards_list==None)] = 0
 
-    enemy_index = 1 - index
-    if rewards_list[index] > rewards_list[enemy_index]:
-        reward = 1
-    elif rewards_list[index] == rewards_list[enemy_index]:
-        reward = 0
-    elif rewards_list[index] < rewards_list[enemy_index]:
-        reward = -1
-    else:
-        NotImplementedError
-    return reward
-
-def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', only_win=False): 
+def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', only_win=False, target_sub_id_list=[]): 
     logger.info(f"Team: {team_name}")
     labels = []
     obs_ids = []
     unit_ids = []
-    tile_poses = []
-    is_units = []
 
     os.makedirs(data_dir, exist_ok=True)
     non_actions_count = 0
@@ -180,13 +145,16 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
             submission_id_list.append(json_load['other']['SubmissionId'])            
             latest_lb_list.append(json_load['other']['LatestLB'])            
     sub_df = pd.DataFrame([submission_id_list, latest_lb_list], index=['SubmissionId', 'LatestLB']).T
-    target_sub_id = sub_df["SubmissionId"].value_counts().index[0]
-
+    # target_sub_id = sub_df["SubmissionId"].value_counts().index[0]
+    # target_sub_id_list.append(target_sub_id)
+    print(sub_df.groupby(['SubmissionId'])['LatestLB'].mean())
+    print(sub_df.groupby(['SubmissionId'])['LatestLB'].count())
+    print('target sub id:', target_sub_id_list)
     for filepath in tqdm(episodes): 
         with open(filepath) as f:
             json_load = json.load(f)
 
-        if json_load['other']['SubmissionId'] != target_sub_id:
+        if json_load['other']['SubmissionId'] not in target_sub_id_list:
             continue
 
         ep_id = json_load['info']['EpisodeId']
@@ -204,7 +172,6 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
                 continue
             own_index = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex
 
-        reward = get_reward(json_load, own_index)
         for i in range(len(json_load['steps'])-1):
             if json_load['steps'][i][own_index]['status'] == 'ACTIVE':
                 # 現在のstep=iのobsを見て選択されたactionが正解データになるのでi+1のactionを取得する
@@ -232,32 +199,41 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
                     pickle.dump(obs, f)
                 for action in actions:
                     # moveとbuild cityのaction labelのみが取得される?
-                    label, unit_id, tile_pos, is_unit = to_label(action)
+                    label, unit_id = to_label(action)
                     if label is not None:
                         labels.append(label)
                         obs_ids.append(obs_id)
                         unit_ids.append(unit_id)
-                        tile_poses.append(tile_pos)
-                        is_units.append(is_unit)
 
     df = pd.DataFrame()
     df['label'] = labels
     df['obs_id'] = obs_ids
     df['unit_id'] = unit_ids
-    df['tile_pos'] = tile_poses
-    df['is_unit'] = is_units 
     df.to_csv(data_dir + 'data.csv', index=False)
     logger.info(f"空のactionsの数: {non_actions_count}")
     return df
 
-
 def vertical_flip(state, action):
     """
-    swap north(=1) and south(=3)
+    swap north(=0) and south(=2)
     """
     # flip up/down
     state = state.transpose(2,1,0)  #(c,x,y) -> (y,x,c)
     state = np.flipud(state).copy()
+    if action == 0:
+        action = 2
+    elif action == 2:
+        action = 0
+    state = state.transpose(2,1,0)  # (w,h,c) -> (c,w,h)
+    return state, action
+
+def horizontal_flip(state, action):
+    """
+    swap west(=1) and east(=3)
+    """
+    # flip left/right
+    state = state.transpose(2,1,0) #(x,y,c) -> (y,x,c)
+    state = np.fliplr(state).copy()
     if action == 1:
         action = 3
     elif action == 3:
@@ -265,30 +241,14 @@ def vertical_flip(state, action):
     state = state.transpose(2,1,0)  # (w,h,c) -> (c,w,h)
     return state, action
 
-def horizontal_flip(state, action):
-    """
-    swap west(=2) and east(=4)
-    """
-    # flip left/right
-    state = state.transpose(2,1,0)  #(x,y,c) -> (y,x,c)
-    state = np.fliplr(state).copy()
-    if action == 4:
-        action = 2
-    elif action == 2:
-        action = 4
-    state = state.transpose(2,1,0)  # (w,h,c) -> (c,w,h)
-    return state, action
-
-
 class LuxDataset(Dataset):
-    def __init__(self, df, data_dir, n_obs_channel, phase):
+    def __init__(self, df, data_dir, n_obs_channel=23, n_stack=1, phase='train'):
         self.labels = df['label'].to_numpy()
         self.obs_ids = df['obs_id'].to_numpy()
         self.unit_ids = df['unit_id'].to_numpy()
-        self.tile_poses = df['tile_pos'].to_numpy()
-        self.is_units = df["is_unit"].to_numpy()
         self.data_dir = data_dir 
         self.n_obs_channel = n_obs_channel
+        self.n_stack = n_stack
         self.phase = phase
         
     def __len__(self):
@@ -298,21 +258,30 @@ class LuxDataset(Dataset):
         action = self.labels[idx]
         obs_id = self.obs_ids[idx]
         unit_id = self.unit_ids[idx]
-        tile_pos = self.tile_poses[idx]
-        is_unit = self.is_units[idx]
+
         with open(self.data_dir + f"{obs_id}.pickle", mode="rb") as f:    
             obs = pickle.load(f)
-        state = make_input(obs, unit_id, tile_pos, self.n_obs_channel)  
+        state = make_input(obs, unit_id, self.n_obs_channel)  
+
+        ep_id = obs_id.split("_")[0]
+        step = int(obs_id.split("_")[1])
+        for i in range(1, self.n_stack):
+            if os.path.exists(self.data_dir + f"{ep_id}_{step-i}.pickle"):
+                with open(self.data_dir + f"{ep_id}_{step-i}.pickle", mode="rb") as f:    
+                    last_obs = pickle.load(f)
+                last_state = make_last_input(last_obs)
+            else:
+                last_state = np.zeros((8, 32, 32), dtype=np.float32)
+            state = np.concatenate([state, last_state], axis=0)
+        assert state.shape[0] == self.n_obs_channel + 8*(self.n_stack-1)
 
         if self.phase == 'train':
-            if random.random() > 0.5:
+            if random.random() < 0.3:
                 state, action = horizontal_flip(state, action)
-
-            if random.random() > 0.5:
+            if random.random() < 0.3:
                 state, action = vertical_flip(state, action)  
 
-        return state, action, is_unit
-
+        return state, action
 
 def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, scheduler=None, num_epochs=2):
     best_acc = 0.0
@@ -328,17 +297,11 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
                 
             epoch_ploss = 0.0
             epoch_vloss = 0.0
-            unit_epoch_acc = 0
-            city_epoch_acc = 0
             epoch_acc = 0
-            unit_data_size = 0
-            city_data_size = 0
             dataloader = dataloaders_dict[phase]
             for item in tqdm(dataloader, leave=False):
                 states = item[0].cuda().float()
                 actions = item[1].cuda().long()
-                is_units = item[2]
-                # rewards = item[2].cuda().float()
 
                 optimizer.zero_grad()
                 
@@ -357,28 +320,19 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
                     batch_size = len(policy)
                     epoch_ploss += policy_loss.item() * batch_size
                     # epoch_vloss += value_loss.item() * batch_size
-                    unit_mask = (is_units == 1).float()  # unitのみ取り出す
-                    city_mask = (is_units == 0).float()  # cityのみ取り出す
                     num_correct = (preds.cpu() == actions.data.cpu())
-                    unit_epoch_acc += torch.sum(unit_mask * num_correct)
-                    city_epoch_acc += torch.sum(city_mask * num_correct)
                     epoch_acc += torch.sum(num_correct)
 
-                    unit_data_size += torch.sum(unit_mask)
-                    city_data_size += torch.sum(city_mask)
 
             data_size = len(dataloader.dataset)
-            assert data_size == unit_data_size + city_data_size, f"all:{data_size}, unit:{unit_data_size}, city:{city_data_size}"
             epoch_ploss = epoch_ploss / data_size
             # epoch_vloss = epoch_vloss / data_size
-            unit_epoch_acc = unit_epoch_acc.double() / unit_data_size
-            city_epoch_acc = city_epoch_acc.double() / city_data_size
             epoch_acc = epoch_acc.double() / data_size
             if phase == 'train':
-                wandb.log({'Loss/train': epoch_ploss, 'ACC/train-unit': unit_epoch_acc, 'ACC/train-city': city_epoch_acc, 'ACC/train': epoch_acc})
-                logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Acc: {epoch_acc:.4f} (unit:{unit_epoch_acc:.4f}/city{city_epoch_acc:.4f})')
+                wandb.log({'Loss/train': epoch_ploss, 'ACC/train': epoch_acc})
+                logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Acc: {epoch_acc:.4f}')
             elif phase=='val':
-                wandb.log({'Loss/val': epoch_ploss, 'ACC/val-unit': unit_epoch_acc, 'ACC/val-city': city_epoch_acc, 'ACC/val': epoch_acc})
+                wandb.log({'Loss/val': epoch_ploss, 'ACC/val': epoch_acc})
                 logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Acc: {epoch_acc:.4f}')
         
         if epoch_acc > best_acc:
@@ -397,28 +351,30 @@ def main():
     wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
     episode_dir = '../../input/lux_ai_toad1800_episodes_1108/'
     data_dir = "./tmp_data/"
-    df = create_dataset_from_json(episode_dir, data_dir, only_win=False)
+    target_sub_id_list = [23281649]  # [23032370]  # [23281649, 23297953]  # 23032370
+    df = create_dataset_from_json(episode_dir, data_dir, only_win=True, target_sub_id_list=target_sub_id_list)
     logger.info(f"obses:{df['obs_id'].nunique()} samples:{len(df)}")
+    n_stack = 1
 
     labels = df['label'].to_numpy()
-    actions = ['center', 'north', 'west', 'south', 'east', 'transfer', 'bcity']
-    # for value, count in zip(*np.unique(labels, return_counts=True)):
-    #     logger.info(f'{actions[value]:^5}: {count:>3}')
-    
-    n_obs_channel = 25
+    actions = ['north', 'west', 'south', 'east', 'bcity']
+    for value, count in zip(*np.unique(labels, return_counts=True)):
+        logger.info(f'{actions[value]:^5}: {count:>3}')
+    _n_obs_channel = 23
+    n_obs_channel = _n_obs_channel + 8*(n_stack-1)
     observation_space = spaces.Box(low=0, high=1, shape=(n_obs_channel, 32, 32), dtype=np.float16)
     model = LuxNet(observation_space=observation_space, features_dim=len(actions))
     train_df, val_df = train_test_split(df, test_size=0.1, random_state=seed, stratify=labels)
 
     batch_size = 64  # 2048
     train_loader = DataLoader(
-        LuxDataset(train_df, data_dir, n_obs_channel, phase='train'), 
+        LuxDataset(train_df, data_dir, _n_obs_channel, n_stack=n_stack, phase='train'), 
         batch_size=batch_size, 
         shuffle=True, 
         num_workers=24
     )
     val_loader = DataLoader(
-        LuxDataset(val_df, data_dir, n_obs_channel, phase='val'), 
+        LuxDataset(val_df, data_dir, _n_obs_channel, n_stack=n_stack, phase='val'), 
         batch_size=batch_size, 
         shuffle=False, 
         num_workers=24
@@ -429,7 +385,7 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     # scheduler = CosineAnnealingLR(optimizer, T_max=10)
 
-    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, num_epochs=2)
+    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, num_epochs=10)
     wandb.finish()
     shutil.rmtree(data_dir)
 

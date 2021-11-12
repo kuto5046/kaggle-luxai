@@ -1,6 +1,6 @@
 from stable_baselines3 import PPO  # pip install stable-baselines3
 
-
+import os 
 import sys
 sys.path.append("../../LuxPythonEnvGym/")
 from luxai2021.env.agent import AgentFromStdInOut
@@ -9,7 +9,8 @@ from luxai2021.game.constants import LuxMatchConfigs_Default, LuxMatchConfigs_Re
 from agent_policy import ImitationAgent
 from luxai2021.game.game import Game 
 
-pretrained_model = 'best.pth'
+path = '/kaggle_simulations/agent' if os.path.exists('/kaggle_simulations') else '.'
+pretrained_model = path + '/1800_model/best.pth'
 _agent = ImitationAgent(model_path=pretrained_model)
 
 
