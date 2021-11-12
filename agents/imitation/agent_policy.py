@@ -15,9 +15,7 @@ from luxai2021.env.agent import Agent, AgentWithModel
 from luxai2021.game.actions import *
 from luxai2021.game.game_constants import GAME_CONSTANTS
 from luxai2021.game.position import Position
-
-# path = '/kaggle_simulations/agent' if os.path.exists('/kaggle_simulations') else '.'
-
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 def smart_transfer_to_nearby(game, team, unit_id, unit, target_type_restriction=None, **kwarg):
     """
@@ -97,7 +95,6 @@ def smart_transfer_to_nearby(game, team, unit_id, unit, target_type_restriction=
     
     return TransferAction(team, unit_id, target_unit_id, resource_type, resource_amount)
 
-
 # Neural Network for Lux AI
 class BasicConv2d(nn.Module):
     def __init__(self, input_dim, output_dim, kernel_size, bn):
@@ -114,17 +111,14 @@ class BasicConv2d(nn.Module):
         h = self.bn(h) if self.bn is not None else h
         return h
 
-class LuxNet(nn.Module):
-    def __init__(self, num_actions, n_obs_channel):
-        super().__init__()
+class LuxNet(BaseFeaturesExtractor):
+    def __init__(self, observation_space, features_dim):
+        super(LuxNet, self).__init__(observation_space, features_dim)
         layers, filters = 12, 32
-        self.conv0 = BasicConv2d(n_obs_channel, filters, (3, 3), False)
-        self.num_actions = num_actions
-        # self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), False)] * layers)
+        self.n_obs_channel = observation_space.shape[0]
+        self.conv0 = BasicConv2d(self.n_obs_channel, filters, (3, 3), False)
         self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
-
-        self.head_p = nn.Linear(filters, self.num_actions, bias=False)
-        self.head_v = nn.Linear(filters*2, 1, bias=False)  # for value(reward)
+        self.head_p = nn.Linear(filters, features_dim, bias=False)
 
     def forward(self, x):
         h = F.relu_(self.conv0(x))
@@ -133,38 +127,31 @@ class LuxNet(nn.Module):
         # h = (batch, c, w, h) -> (batch, c) 
         # h:(64,32,32,32)
         h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # h=head: (64, 32)
-        h_avg = h.view(h.size(0), h.size(1), -1).mean(-1)  # h_avg: (64, 32)
         p = self.head_p(h_head)  # policy
-        v = torch.tanh(self.head_v(torch.cat([h_head, h_avg], dim=1)))  # value
-        return p, v.squeeze(dim=1)
-
+        return p
 
 class ImitationAgent(Agent):
-    def __init__(self) -> None:
+    def __init__(self, model_path=None) -> None:
         """
         Implements an agent opponent
         """
+        # super(ImitationAgent, self).__init__(model_path)
         self.team = None
         self.match_controller = None
-        self.model = LuxNet(num_actions=7, n_obs_channel=23)
-
-        root_path = '/kaggle/input/' if os.path.exists('/kaggle/input/') else '/work/'
-        path = root_path + "agents/imitation/_best.pth"
-        self.model.load_state_dict(torch.load(path))
-        # path = "agents/imitation"
-        # self.model = torch.jit.load(f'{path}/best.pth')
-        self.model.eval()
-
         self.actions_units = [
-            # partial(MoveAction, direction=Constants.DIRECTIONS.CENTER),  # This is the do-nothing action
             partial(MoveAction, direction=Constants.DIRECTIONS.NORTH),
-            partial(MoveAction, direction=Constants.DIRECTIONS.SOUTH),
             partial(MoveAction, direction=Constants.DIRECTIONS.WEST),
+            partial(MoveAction, direction=Constants.DIRECTIONS.SOUTH),
             partial(MoveAction, direction=Constants.DIRECTIONS.EAST),
             SpawnCityAction,
-            PillageAction,
-            partial(smart_transfer_to_nearby, target_type_restriction=Constants.UNIT_TYPES.WORKER), # Transfer to nearby worker
+  
         ]
+        self.n_obs_channel = 23
+        observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
+        self.model = LuxNet(observation_space, features_dim=len(self.actions_units))
+        if model_path is not None:
+            self.model.load_state_dict(torch.load(model_path))
+        self.model.eval()
 
     def game_start(self, game):
         """
@@ -195,9 +182,9 @@ class ImitationAgent(Agent):
         base_state = self.get_base_observation(game, team)
         for unit in units:
             if unit.can_act() and (game.state["turn"] % 40 < 30 or not in_city(unit.pos, game, team)):
-                state = self.get_unit_observation(game, base_state, unit, team)
+                state = self.get_observation(game, unit, team, base_state)
                 with torch.no_grad():
-                    p, _ = self.model(torch.from_numpy(state).unsqueeze(0))
+                    p = self.model(torch.from_numpy(state).unsqueeze(0))
                 policy = p.squeeze(0).numpy()
                 action, pos = self.action_code_to_action(policy, game, unit=unit, dest=dest, team=team)
                 
@@ -231,105 +218,17 @@ class ImitationAgent(Agent):
                             unit_count += 1
 
                         # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
-                        elif not game.state["teamStates"][team]["researched"]["uranium"]:
+                        elif game.state["teamStates"][team]["researchPoints"] < 200:
                             action = ResearchAction(team, x, y, None)
                             actions.append(action)
                             game.state["teamStates"][team]["researchPoints"] += 1
 
                         # new_turn = False
-
         time_taken = time.time() - start_time
         if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
             print("WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
                   file=sys.stderr)
         return actions
-
-    def get_observation(self, game, unit, city_tile, team, is_new_turn):
-        """
-        Implements getting a observation from the current game for this unit or city
-        """
-
-        height = game.map.height
-        width = game.map.width
-
-        x_shift = (32 - width) // 2
-        y_shift = (32 - height) // 2
-
-        b = np.zeros((23, 32, 32), dtype=np.float32)
-        opponent_team = 1 - team
-        # target unit
-        if unit is not None:
-            if unit.type == Constants.UNIT_TYPES.WORKER:
-                x = unit.pos.x + x_shift
-                y = unit.pos.y + y_shift
-                resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / 100
-                b[:2, x,y] = (1, resource)
-        
-        # unit
-        for _unit in game.state["teamStates"][team]["units"].values():
-            if _unit.id == unit.id:
-                continue
-            x = _unit.pos.x + x_shift
-            y = _unit.pos.y + y_shift
-            cooldown = _unit.cooldown / 6
-            resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / 100
-            b[2:5, x,y] = (1, cooldown, resource)
-        
-        for _unit in game.state["teamStates"][opponent_team]["units"].values():
-            x = _unit.pos.x + x_shift
-            y = _unit.pos.y + y_shift
-            cooldown = _unit.cooldown / 6
-            resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / 100
-            b[5:8, x,y] = (1, cooldown, resource)
-        
-        # city tile
-        for city in game.cities.values():
-            fuel = city.fuel
-            lightupkeep = city.get_light_upkeep()
-            fuel_ratio = min(fuel / lightupkeep, 10) / 10
-            for cell in city.city_cells:
-                x = cell.pos.x + x_shift
-                y = cell.pos.y + y_shift
-                cooldown = cell.city_tile.cooldown / 10
-                if city.team == team:
-                    b[8:11, x, y] = (1, fuel_ratio, cooldown)
-                else:
-                    b[11:14, x, y] = (1, fuel_ratio, cooldown)
-        
-        # resource
-        resource_dict = {'wood': 14, 'coal': 15, 'uranium': 16}
-        for cell in game.map.resources:
-            x = cell.pos.x + x_shift
-            y = cell.pos.y + y_shift
-            r_type = cell.resource.type
-            amount = cell.resource.amount / 800
-            idx = resource_dict[r_type]
-            b[idx, x, y] = amount
-        
-        # research points
-        b[17, :] = min(game.state["teamStates"][team]["researchPoints"], 200) / 200
-        b[18, :] = min(game.state["teamStates"][opponent_team]["researchPoints"], 200) / 200
-        
-        # road
-        for row in game.map.map:
-            for cell in row:
-                if cell.road > 0:
-                    x = cell.pos.x + x_shift
-                    y = cell.pos.y + y_shift
-                    b[19, x,y] = cell.road / 6
-
-        # road_level = 0
-        # b[19, :] =  road_level / 6
-
-        # cycle
-        b[20, :] = game.state["turn"] % 40 / 40
-        b[21, :] = game.state["turn"] / 360
-        
-        # map
-        b[22, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
-
-        return b 
-
 
     def get_base_observation(self, game, team):
         """
@@ -342,7 +241,7 @@ class ImitationAgent(Agent):
         x_shift = (32 - width) // 2
         y_shift = (32 - height) // 2
 
-        b = np.zeros((23, 32, 32), dtype=np.float32)
+        b = np.zeros((self.n_obs_channel, 32, 32), dtype=np.float32)
         opponent_team = 1 - team
         
         # unit
@@ -350,15 +249,15 @@ class ImitationAgent(Agent):
             x = _unit.pos.x + x_shift
             y = _unit.pos.y + y_shift
             cooldown = _unit.cooldown / 6
-            resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / 100
-            b[2:5, x,y] = (1, cooldown, resource)
+            resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / 2000
+            b[2:5, x,y] += (1, cooldown, resource)
         
         for _unit in game.state["teamStates"][opponent_team]["units"].values():
             x = _unit.pos.x + x_shift
             y = _unit.pos.y + y_shift
             cooldown = _unit.cooldown / 6
-            resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / 100
-            b[5:8, x,y] = (1, cooldown, resource)
+            resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / 2000
+            b[5:8, x,y] += (1, cooldown, resource)
         
         # city tile
         for city in game.cities.values():
@@ -405,8 +304,7 @@ class ImitationAgent(Agent):
 
         return b 
 
-
-    def get_unit_observation(self, game, base_state, unit, team):
+    def get_observation(self, game, unit, team, base_state):
         """
         Implements getting a observation from the current game for this unit or city
         """
@@ -421,18 +319,12 @@ class ImitationAgent(Agent):
         
         # target unit
         if unit is not None:
-            if unit.type == Constants.UNIT_TYPES.WORKER:
-                x = unit.pos.x + x_shift
-                y = unit.pos.y + y_shift
-                resource = (unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / 100
-                b[:2, x,y] = (1, resource)
-        
-        # unit
-        for _unit in game.state["teamStates"][team]["units"].values():
-            if _unit.id == unit.id:
-                x = _unit.pos.x + x_shift
-                y = _unit.pos.y + y_shift
-                b[2:5, x,y] = (0, 0, 0)
+            x = unit.pos.x + x_shift
+            y = unit.pos.y + y_shift
+            cooldown = np.array(unit.cooldown / 6, dtype=np.float32)
+            resource = np.array((unit.cargo["wood"] + unit.cargo["coal"] + unit.cargo["uranium"]) / 2000, dtype=np.float32)
+            b[:2, x, y] = (1, resource)
+            b[2:5, x, y] -= (1, cooldown, resource)
         
         return b 
 
