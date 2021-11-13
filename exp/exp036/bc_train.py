@@ -72,15 +72,27 @@ def make_env(local_env, rank, seed=0):
     set_random_seed(seed)
     return _init
 
-def filter(episodes, target_sub_id, team_name, only_win, only_one_sub):
+def visualize_lbscore_and_num_episodes_by_sub(episodes):
+    submission_id_list = []
+    latest_lb_list = []
+    for filepath in tqdm(episodes): 
+        with open(filepath) as f:
+            json_load = json.load(f)
+            submission_id_list.append(json_load['other']['SubmissionId'])            
+            latest_lb_list.append(json_load['other']['LatestLB'])            
+    sub_df = pd.DataFrame([submission_id_list, latest_lb_list], index=['SubmissionId', 'LatestLB']).T
+    print(sub_df.groupby(['SubmissionId'])['LatestLB'].mean())
+    print(sub_df.groupby(['SubmissionId'])['LatestLB'].count())
+
+def filter(episodes, target_sub_id_list, team_name, only_win):
     filtering_episodes = []
     for filepath in episodes: 
         with open(filepath) as f:
             json_load = json.load(f)
 
-        if only_one_sub:
-            if json_load['other']['SubmissionId'] != target_sub_id:
-                continue
+        assert len(target_sub_id_list) > 0, "There is not any target submission id in list"
+        if json_load['other']['SubmissionId'] not in target_sub_id_list:
+            continue
         win_index = np.argmax([r or 0 for r in json_load['rewards']])  # win or tie
         if only_win:  # 指定したチームが勝ったepisodeのみ取得
             if json_load['info']['TeamNames'][win_index] != team_name:
@@ -106,7 +118,7 @@ def get_most_large_sub_id(episodes):
     print("target(most large) submission id:", target_sub_id)
     return target_sub_id
 
-def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', only_win=False, only_one_sub=False): 
+def create_dataset_from_json(episode_dir, data_dir, target_sub_id_list=[], team_name='Toad Brigade', only_win=False): 
     print(f"Team: {team_name}")
     labels = []
     obs_ids = []
@@ -114,8 +126,8 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
     os.makedirs(data_dir, exist_ok=True)
     non_actions_count = 0
     episodes = [path for path in Path(episode_dir).glob('*.json') if 'output' not in path.name]
-    target_sub_id = get_most_large_sub_id(episodes)
-    episodes = filter(episodes, target_sub_id, team_name, only_win, only_one_sub)
+    # target_sub_id = get_most_large_sub_id(episodes)
+    episodes = filter(episodes, target_sub_id_list, team_name, only_win)
     for filepath in tqdm(episodes, total=len(episodes)): 
         with open(filepath) as f:
             json_load = json.load(f)
@@ -446,10 +458,9 @@ def main():
         monitor_gym=False,  # auto-upload the videos of agents playing the game
         save_code=False,  # optional
     )
-
-    df = create_dataset_from_json(episode_dir, data_dir, only_win=only_win, only_one_sub=only_one_sub)
+    target_sub_id_list = [23281649, 23297953] 
+    df = create_dataset_from_json(episode_dir, data_dir, target_sub_id_list, only_win=False)
     print(f"obses:{df['obs_id'].nunique()} samples:{len(df)}")
-
 
     unit_action_names = ['center', 'north', 'west', 'south', 'east', 'transfer', 'bcity']
     for action, _df in df.groupby(['action']):
@@ -501,10 +512,11 @@ def main():
         #                                                 learning_agent=AgentPolicy(mode="train", n_stack=n_stack),
         #                                                 opponent_agents={"imitation": ImitationAgent},
         #                                                 initial_opponent_policy="imitation"), rank=i) for i in range(n_envs)])
+        os.makedirs('./models/', exist_ok=True)
         bc_trainer.train(
             # log_rollouts_venv=env,
             **bc_trainer_params)
-        bc_trainer.save_policy('bc_policy')
+        bc_trainer.save_policy(f'./models/bc_policy_{run_id}')
         valid_model(bc_trainer, val_loader, unit_action_names)
 
     # elif method == "GAIL":

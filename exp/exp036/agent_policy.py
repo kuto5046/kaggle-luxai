@@ -160,7 +160,7 @@ class AgentPolicy(AgentWithModel):
         self.action_space = spaces.Discrete(len(self.actions_units))
         self.n_stack = n_stack
         self._n_obs_channel = 23  # base obs
-        self.n_obs_channel = self._n_obs_channel + (2 * (self.n_stack-1))  # base obs + last obs
+        self.n_obs_channel = self._n_obs_channel + (8 * (self.n_stack-1))  # base obs + last obs
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
         
         self.object_nodes = {}
@@ -232,7 +232,7 @@ class AgentPolicy(AgentWithModel):
         self.fuel_collected_last = 0
         self.research_points_last = 0
         self.rewards = {}
-        self.last_unit_obs = [np.zeros((2, 32, 32)) for i in range(self.n_stack-1)]
+        self.last_unit_obs = [np.zeros((8, 32, 32)) for i in range(self.n_stack-1)]
 
     def process_turn(self, game, team):
         """
@@ -295,7 +295,7 @@ class AgentPolicy(AgentWithModel):
         return actions
 
     def get_last_observation(self, obs):
-        current_unit_obs = np.array([obs[2], obs[5]])  # own unit pos, opponent unit pos
+        current_unit_obs = obs[[2,4,5,7,8,9,11,12]]  # own_unit/opponent_unit/own_citytile/opponent_citytile
         # assert np.sum(current_unit_obs > 1) == 0
         self.last_unit_obs.append(current_unit_obs)
         if len(self.last_unit_obs)>=self.n_stack:  # 過去情報をn_stack分に保つ
@@ -313,7 +313,7 @@ class AgentPolicy(AgentWithModel):
         x_shift = (32 - width) // 2
         y_shift = (32 - height) // 2
 
-        b = np.zeros((self.n_obs_channel, 32, 32), dtype=np.float32)
+        b = np.zeros((self._n_obs_channel, 32, 32), dtype=np.float32)
         opponent_team = 1 - team
         
         # unit
