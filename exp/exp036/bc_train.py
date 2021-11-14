@@ -458,7 +458,8 @@ def main():
         monitor_gym=False,  # auto-upload the videos of agents playing the game
         save_code=False,  # optional
     )
-    target_sub_id_list = [23281649, 23297953] 
+
+    target_sub_id_list = [23032370]  # [23281649, 23297953]  # 23032370
     df = create_dataset_from_json(episode_dir, data_dir, target_sub_id_list, only_win=False)
     print(f"obses:{df['obs_id'].nunique()} samples:{len(df)}")
 
