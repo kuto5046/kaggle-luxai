@@ -4,6 +4,7 @@ import time
 from functools import partial  # pip install functools
 import copy
 import random
+import onnxruntime as ort
 from PIL.features import features
 import torch 
 import torch.nn as nn 
@@ -159,9 +160,17 @@ class ImitationAgent(Agent):
         self.n_obs_channel = 23
         observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
         self.model = LuxNet(observation_space, features_dim=len(self.actions_units))
+        
         if model_path is not None:
-            self.model.load_state_dict(torch.load(model_path))
-        self.model.eval()
+            if ".pth" in model_path:
+                self.model.load_state_dict(torch.load(model_path))
+                self.model.eval()
+            elif ".onnx" in model_path:
+                self.model = ort.InferenceSession(model_path)
+
+    def onnx_predict(self, input):
+        output = self.model.run(None, {"input_1": input})[0][0]
+        return output 
 
     def game_start(self, game):
         """
@@ -199,10 +208,11 @@ class ImitationAgent(Agent):
                     # assert count == 0
                     # if count > 0:
                     #     print(f"異なる要素数:{observation['step']}step-{c}channel", count)
-                     
-                with torch.no_grad():
-                    p = self.model(torch.from_numpy(state).unsqueeze(0))
-                policy = p.squeeze(0).numpy()
+                
+                policy = self.onnx_predict(np.expand_dims(state, 0))
+                # with torch.no_grad():
+                #     p = self.model(torch.from_numpy(state).unsqueeze(0))
+                # policy = p.squeeze(0).numpy()
                 action, pos = self.action_code_to_action(policy, game, unit=unit, dest=dest, team=team)
                 
                 if action is not None:
@@ -242,7 +252,7 @@ class ImitationAgent(Agent):
 
                         # new_turn = False
         time_taken = time.time() - start_time
-        if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
+        if time_taken > 0.0:  # Warn if larger than 0.5 seconds.
             print("WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
                   file=sys.stderr)
         return actions

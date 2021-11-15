@@ -10,7 +10,8 @@ from agent_policy import ImitationAgent
 from luxai2021.game.game import Game 
 
 path = '/kaggle_simulations/agent' if os.path.exists('/kaggle_simulations') else '.'
-pretrained_model = path + '/1900_model/best.pth'
+# pretrained_model = path + '/1900_model/best.pth'
+pretrained_model = path + '/1800_model/best.onnx'
 _agent = ImitationAgent(model_path=pretrained_model)
 
 

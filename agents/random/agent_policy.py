@@ -86,7 +86,7 @@ class RandomAgent(Agent):
         don't modify this part of the code.
         Returns: Array of actions to perform.
         """
-        # start_time = time.time()
+        start_time = time.time()
         new_turn = True
         actions = []
 
@@ -112,8 +112,8 @@ class RandomAgent(Agent):
                         actions.append(action)
                         new_turn = False
 
-        # time_taken = time.time() - start_time
-        # if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
-        #     print("WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
-        #           file=sys.stderr)
+        time_taken = time.time() - start_time
+        if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
+            print("[Random Agent]WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
+                  file=sys.stderr)
         return actions

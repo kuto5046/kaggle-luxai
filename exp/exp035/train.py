@@ -339,6 +339,8 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
             traced = torch.jit.trace(model.cpu(), torch.rand(1, n_obs_channel, 32, 32))
             traced.save('jit_best.pth')
             torch.save(model.cpu().state_dict(), 'best.pth')
+            dummy_input = states[0].unsqueeze(0).cpu()
+            torch.onnx.export(model.cpu(), dummy_input, f"best_epoch{epoch}.onnx",input_names=['input_1'])
             best_acc = epoch_acc
 
         if scheduler is not None:
@@ -351,7 +353,7 @@ def main():
     wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
     episode_dir = '../../input/lux_ai_toad1800_episodes_1108/'
     data_dir = "./tmp_data/"
-    target_sub_id_list = [23281649]  # [23032370]  # [23281649, 23297953]  # 23032370
+    target_sub_id_list = [23032370]  # [23281649, 23297953]  # 23032370
     df = create_dataset_from_json(episode_dir, data_dir, only_win=True, target_sub_id_list=target_sub_id_list)
     logger.info(f"obses:{df['obs_id'].nunique()} samples:{len(df)}")
     n_stack = 1

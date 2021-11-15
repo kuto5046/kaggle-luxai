@@ -4,18 +4,21 @@ import time
 from functools import partial  # pip install functools
 import copy
 import random
+import onnxruntime as ort
 import torch 
 import torch.nn as nn 
 import torch.nn.functional as F
 import numpy as np
 from gym import spaces
-
+import glob 
 sys.path.append("../../LuxPythonEnvGym/")
 from luxai2021.env.agent import Agent, AgentWithModel
 from luxai2021.game.actions import *
 from luxai2021.game.game_constants import GAME_CONSTANTS
 from luxai2021.game.position import Position
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+
+
 
 def smart_transfer_to_nearby(game, team, unit_id, unit, target_type_restriction=None, **kwarg):
     """
@@ -131,7 +134,7 @@ class LuxNet(BaseFeaturesExtractor):
         return p
 
 class ImitationAgent(Agent):
-    def __init__(self, model_path=None) -> None:
+    def __init__(self) -> None:
         """
         Implements an agent opponent
         """
@@ -148,9 +151,21 @@ class ImitationAgent(Agent):
         ]
         self.n_obs_channel = 23
         observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
-        self.model = LuxNet(observation_space, features_dim=len(self.actions_units))
-        if model_path is not None:
-            self.model.load_state_dict(torch.load(model_path))
+        self.model_path = "/work/agents/imitation/models/toad1800_1115.onnx"
+        self.model = None 
+        # self.model = LuxNet(observation_space, features_dim=len(self.actions_units))
+        # self.set_model()
+        # model_path = "/work/agents/imitation/models/toad1800_1115.onnx"
+        # self.model = ort.InferenceSession(model_path)
+
+    def onnx_predict(self, input):
+        output = self.model.run(None, {"input_1": np.expand_dims(input, 0)})[0][0]
+        return output 
+    
+    def set_model(self):
+        model_paths = glob.glob("/work/agents/imitation/models/*.pth")
+        model_path = random.choice(model_paths)
+        self.model.load_state_dict(torch.load(model_path))
         self.model.eval()
 
     def game_start(self, game):
@@ -171,28 +186,50 @@ class ImitationAgent(Agent):
         don't modify this part of the code.
         Returns: Array of actions to perform.
         """
+        
         start_time = time.time()
+        # in vectolized environment, inference model is very slow
+        # So I use onnx model and load model in each turn
+        if self.model is None:
+            self.model = ort.InferenceSession(self.model_path)
         actions = []
-        # new_turn = True
+        new_turn = True
 
         # Inference the model per-unit
         dest = []
         units = game.state["teamStates"][team]["units"].values()
         unit_count = len(units)
         base_state = self.get_base_observation(game, team)
+        
+        # batch_state = []
+        # batch_unit = []
+        # for unit in units:
+        #     if unit.can_act() and (game.state["turn"] % 40 < 30 or not in_city(unit.pos, game, team)):
+        #         state = self.get_observation(game, unit, team, base_state)
+        #         batch_state.append(state)
+        #         batch_unit.append(unit)
+        # batch_size = len(batch_state)
+        # if batch_size > 0:
+        #     states = torch.from_numpy(np.stack(batch_state))
+        #     with torch.no_grad():
+        #         policies = self.model(states).numpy()
+        #     for i in range(batch_size):
+        #         action, pos = self.action_code_to_action(policies[i], game, unit=batch_unit[i], dest=dest, team=team)
+
         for unit in units:
             if unit.can_act() and (game.state["turn"] % 40 < 30 or not in_city(unit.pos, game, team)):
                 state = self.get_observation(game, unit, team, base_state)
-                with torch.no_grad():
-                    p = self.model(torch.from_numpy(state).unsqueeze(0))
-                policy = p.squeeze(0).numpy()
+                # with torch.no_grad():
+                #     p = self.model(torch.from_numpy(state).unsqueeze(0))
+                # policy = p.squeeze(0).numpy()
+                policy = self.onnx_predict(state)
                 action, pos = self.action_code_to_action(policy, game, unit=unit, dest=dest, team=team)
                 
                 if action is not None:
                     actions.append(action)
                 if pos is not None:
                     dest.append(pos)
-                # new_turn = False
+                new_turn = False
 
         # city
         city_tile_count = 0
@@ -201,7 +238,7 @@ class ImitationAgent(Agent):
                 if city.team == team:
                     city_tile_count += 1
 
-        # Inference the model per-city
+        # # Inference the model per-city
         cities = game.cities.values()
         for city in cities:
             if city.team == team:
@@ -223,10 +260,10 @@ class ImitationAgent(Agent):
                             actions.append(action)
                             game.state["teamStates"][team]["researchPoints"] += 1
 
-                        # new_turn = False
+                        new_turn = False
         time_taken = time.time() - start_time
         if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
-            print("WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
+            print(f"[Imitation Agent]WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
                   file=sys.stderr)
         return actions
 
@@ -328,7 +365,6 @@ class ImitationAgent(Agent):
         
         return b 
 
-
     def action_code_to_action(self, policy, game, unit=None, city_tile=None, team=None, dest=[]):
         """
         Takes an action in the environment according to actionCode:
@@ -384,7 +420,7 @@ class ImitationAgent(Agent):
             
             return None, None 
 
-             
+
 def in_city(pos, game, team):    
     try:
         citytile = game.map.get_cell(pos.x, pos.y).city_tile
