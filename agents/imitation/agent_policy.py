@@ -191,6 +191,7 @@ class ImitationAgent(Agent):
         # in vectolized environment, inference model is very slow
         # So I use onnx model and load model in each turn
         if self.model is None:
+            print("[Imitation Agent]load onnx model")
             self.model = ort.InferenceSession(self.model_path)
         actions = []
         new_turn = True

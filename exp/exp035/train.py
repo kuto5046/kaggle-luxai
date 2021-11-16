@@ -68,6 +68,94 @@ def to_label(action):
         label = None
     return label, unit_id 
 
+
+# Input for Neural Network
+def make_input(obs, unit_id, n_obs_channel):
+    width, height = obs['width'], obs['height']
+
+    # mapのサイズを調整するためにshiftするマス数
+    # width=20の場合は6 width=21の場合5
+    x_shift = (32 - width) // 2
+    y_shift = (32 - height) // 2
+    cities = {}
+    
+    # (c, w, h)
+    # mapの最大サイズが(32,32)なのでそれに合わせている
+    b = np.zeros((n_obs_channel, 32, 32), dtype=np.float32)
+    
+    for update in obs['updates']:
+        strs = update.split(' ')
+        input_identifier = strs[0]
+
+        if input_identifier == 'u':
+            x = int(strs[4]) + x_shift
+            y = int(strs[5]) + y_shift
+            wood = int(strs[7])
+            coal = int(strs[8])
+            uranium = int(strs[9])
+            if unit_id == strs[3]:
+                # Position and Cargo
+                b[:2, x, y] = (
+                    1,
+                    (wood + coal + uranium) / 2000
+                )
+            else:
+                # Units
+                team = int(strs[2])
+                cooldown = float(strs[6])
+                idx = 2 + (team - obs['player']) % 2 * 3
+                b[idx:idx + 3, x, y] += (
+                    1,
+                    cooldown / 6,
+                    (wood + coal + uranium) / 2000
+                )
+        elif input_identifier == 'ct':
+            # CityTiles
+            team = int(strs[1])
+            city_id = strs[2]
+            x = int(strs[3]) + x_shift
+            y = int(strs[4]) + y_shift
+            cooldown = int(strs[5])
+            idx = 8 + (team - obs['player']) % 2 * 3
+            b[idx:idx + 3, x, y] = (
+                1,
+                cities[city_id],
+                cooldown / 10
+            )
+        elif input_identifier == 'r':
+            # Resources
+            r_type = strs[1]
+            x = int(strs[2]) + x_shift
+            y = int(strs[3]) + y_shift
+            amt = int(float(strs[4]))
+            b[{'wood': 14, 'coal': 15, 'uranium': 16}[r_type], x, y] = amt / 800
+        elif input_identifier == 'rp':
+            # Research Points
+            team = int(strs[1])
+            rp = int(strs[2])
+            b[17 + (team - obs['player']) % 2, :] = min(rp, 200) / 200
+        elif input_identifier == 'c':
+            # Cities
+            city_id = strs[2]
+            fuel = float(strs[3])
+            lightupkeep = float(strs[4])
+            cities[city_id] = min(fuel / lightupkeep, 10) / 10
+        elif input_identifier == "ccd":
+            x = int(strs[1]) + x_shift
+            y = int(strs[2]) + y_shift
+            road_level = float(strs[3])
+            b[19, x, y] =  road_level / 6
+    
+    # Day/Night Cycle
+    b[20, :] = obs['step'] % 40 / 40
+    # Turns
+    b[21, :] = obs['step'] / 360
+    # Map Size
+    b[22, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
+
+    return b
+
+
 # Input for Neural Network
 def make_last_input(obs):
     width, height = obs['width'], obs['height']

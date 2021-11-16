@@ -202,7 +202,17 @@ class AgentPolicy(AgentWithModel):
                     x=x,
                     y=y
                 )
-            
+            else:
+                action =  self.actions_units[action_code%len(self.actions_units)](
+                    game=game,
+                    unit_id=unit.id if unit else None,
+                    unit=unit,
+                    city_id=city_tile.city_id if city_tile else None,
+                    citytile=city_tile,
+                    team=team,
+                    x=x,
+                    y=y
+                )
             return action
         except Exception as e:
             # Not a valid action
@@ -251,7 +261,7 @@ class AgentPolicy(AgentWithModel):
         for unit in units:
             if unit.can_act():
                 obs = self.get_observation(game, unit, None, unit.team, new_turn, base_obs)
-                action_code, _states = self.model.predict(obs, deterministic=False)
+                action_code, _states = self.model.predict(obs, deterministic=True)
                 if action_code is not None:
                     actions.append(
                         self.action_code_to_action(action_code, game=game, unit=unit, city_tile=None, team=unit.team))
@@ -289,7 +299,7 @@ class AgentPolicy(AgentWithModel):
             self.get_last_observation(base_obs)
         time_taken = time.time() - start_time
         if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
-            print("WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
+            print("[RL Agent]WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
                   file=sys.stderr)
 
         return actions
@@ -411,3 +421,130 @@ class AgentPolicy(AgentWithModel):
             b[2:5, x, y] -= (1, cooldown, resource)
 
         return b 
+
+    def get_reward(self, game, is_game_finished, is_new_turn, is_game_error):
+        """
+        Returns the reward function for this step of the game. Reward should be a
+        delta increment to the reward, not the total current reward.
+        """
+        self.rewards = {
+            # "rew/r_city_tiles": 0,
+            # "rew/r_research_points_coal_flag": 0,
+            # "rew/r_research_points_uranium_flag": 0,
+            # "rew/r_fuel_collected": 0,
+            "rew/r_city_tiles_end": 0,
+            # "rew/r_game_win": 0
+            }
+            
+        turn = game.state["turn"]
+        turn_decay = (360-turn)/360
+
+        if is_game_error:
+            # Game environment step failed, assign a game lost reward to not incentivise this
+            print("Game failed due to error")
+            return -1.0
+
+        if not is_new_turn and not is_game_finished:
+            # Only apply rewards at the start of each turn or at game end
+            return 0
+
+        # Get some basic stats
+        unit_count = len(game.state["teamStates"][self.team]["units"])
+        city_count = 0
+        city_count_opponent = 0
+        city_tile_count = 0
+        city_tile_count_opponent = 0
+        for city in game.cities.values():
+            if city.team == self.team:
+                city_count += 1
+            else:
+                city_count_opponent += 1
+
+            for cell in city.city_cells:
+                if city.team == self.team:
+                    city_tile_count += 1
+                else:
+                    city_tile_count_opponent += 1
+                
+        # Give a reward for unit creation/death. 0.05 reward per unit.
+        # self.rewards["rew/r_units"] = (unit_count - self.units_last) * 0.005
+        # self.units_last = unit_count
+
+        # Give a reward for city creation/death. 0.1 reward per city.
+        # self.rewards["rew/r_city_tiles"] = (city_tile_count - self.city_tiles_last) * 0.1
+
+        # number of citytile after night
+        # if (turn > 0)&(turn % 40 == 0):
+        #     self.rewards["rew/r_city_tiles"] += (city_tile_count - city_tile_count_opponent) * 0.01
+        #     # self.rewards["rew/r_city_tiles"] += (city_tile_count - self.city_tiles_last) * 0.01
+        #     self.city_tiles_last = city_tile_count
+
+        # Reward collecting fuel
+        # fuel_collected = game.stats["teamStats"][self.team]["fuelGenerated"]
+        # self.rewards["rew/r_fuel_collected"] += ( (fuel_collected - self.fuel_collected_last) / 20000 )
+        # self.fuel_collected_last = fuel_collected
+
+        # Reward for Research Points
+        # research_points = game.state["teamStates"][self.team]["researchPoints"]
+        # self.rewards["rew/r_research_points"] = (research_points - self.research_points_last) / 200  # 0.005
+        # if (research_points == 50)&(self.research_points_last < 50):
+        #     self.rewards["rew/r_research_points_coal_flag"] += 0.25 * turn_decay
+        # elif (research_points == 200)&(self.research_points_last < 200):
+        #     self.rewards["rew/r_research_points_uranium_flag"] += 1 * turn_decay
+        # self.research_points_last = research_points
+
+        # Give a reward of 1.0 per city tile alive at the end of the game
+        if is_game_finished:
+            self.is_last_turn = True
+            clip = 10
+            self.rewards["rew/r_city_tiles_end"] += np.clip(city_tile_count - city_tile_count_opponent, -clip, clip)
+            
+            # if game.get_winning_team() == self.team:
+            #     self.rewards["rew/r_game_win"] += 1 # Win
+            # else:
+            #     self.rewards["rew/r_game_win"] -= 1 # Loss
+
+        reward = 0
+        for name, value in self.rewards.items():
+            reward += value
+
+        return reward
+
+    def turn_heurstics(self, game, is_first_turn):
+        """
+        This is called pre-observation actions to allow for hardcoded heuristics
+        to control a subset of units. Any unit or city that gets an action from this
+        callback, will not create an observation+action.
+        Args:
+            game ([type]): Game in progress
+            is_first_turn (bool): True if it's the first turn of a game.
+        """
+        unit_count = len(game.state["teamStates"][self.team]["units"].values())
+        # city
+        city_tile_count = 0
+        for city in game.cities.values():
+            for cell in city.city_cells:
+                if city.team == self.team:
+                    city_tile_count += 1
+
+        cities = game.cities.values()
+        for city in cities:
+            if city.team == self.team:
+                for cell in city.city_cells:
+                    city_tile = cell.city_tile
+                    if city_tile.can_act():
+                        x = city_tile.pos.x
+                        y = city_tile.pos.y
+                        # obs = self.get_observation(game, None, city_tile, city.team, new_turn, base_obs)
+                        # action_code, _states = self.model.predict(obs, deterministic=False)
+                        # 保有unit数(worker)よりもcity tileの数が多いならworkerを追加
+                        if unit_count < city_tile_count:
+                            action = SpawnWorkerAction(self.team, None, x, y)
+                            self.match_controller.take_action(action)
+                            unit_count += 1
+
+                        # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
+                        elif game.state["teamStates"][self.team]["researchPoints"] < 200:
+                            action = ResearchAction(self.team, x, y, None)
+                            self.match_controller.take_action(action)
+                            game.state["teamStates"][self.team]["researchPoints"] += 1
