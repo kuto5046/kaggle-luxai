@@ -168,8 +168,9 @@ class ImitationAgent(Agent):
             elif ".onnx" in model_path:
                 self.model = ort.InferenceSession(model_path)
 
-    def onnx_predict(self, input):
-        output = self.model.run(None, {"input_1": input})[0][0]
+    def onnx_predict(self, state):
+        state = np.expand_dims(state, 0)
+        output = self.model.run(None, {"input_1": state})[0][0]
         return output 
 
     def game_start(self, game):
@@ -190,6 +191,7 @@ class ImitationAgent(Agent):
         don't modify this part of the code.
         Returns: Array of actions to perform.
         """
+        tta = TTA()
         start_time = time.time()
         actions = []
         # new_turn = True
@@ -209,7 +211,17 @@ class ImitationAgent(Agent):
                     # if count > 0:
                     #     print(f"異なる要素数:{observation['step']}step-{c}channel", count)
                 
-                policy = self.onnx_predict(np.expand_dims(state, 0))
+                policy1 = tta.vertical_convert_action(self.onnx_predict(tta.vertical_flip(state)))
+                policy2 = tta.horizontal_convert_action(self.onnx_predict(tta.horizontal_flip(state)))
+                policy3 = tta.all_convert_action(self.onnx_predict(tta.all_flip(state)))
+                policy4 = self.onnx_predict(state)
+                policy5 = self.onnx_predict(tta.random_roll(state))
+                policy6 = self.onnx_predict(tta.random_roll(state))
+                policy7 = self.onnx_predict(tta.random_roll(state))
+                # policy = np.mean([policy1, policy5, policy6, policy7], axis=0)
+                # policy = np.mean([policy1, policy2, policy3, policy4], axis=0)
+                policy = np.mean([policy1, policy2, policy3, policy4, policy5, policy6, policy7], axis=0)
+
                 # with torch.no_grad():
                 #     p = self.model(torch.from_numpy(state).unsqueeze(0))
                 # policy = p.squeeze(0).numpy()
@@ -245,14 +257,14 @@ class ImitationAgent(Agent):
                             unit_count += 1
 
                         # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
-                        elif game.state["teamStates"][team]["researchPoints"] < 200:
+                        elif (unit_count>3)&(game.state["teamStates"][team]["researchPoints"] < 200):
                             action = ResearchAction(team, x, y, None)
                             actions.append(action)
                             game.state["teamStates"][team]["researchPoints"] += 1
 
                         # new_turn = False
         time_taken = time.time() - start_time
-        if time_taken > 0.0:  # Warn if larger than 0.5 seconds.
+        if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
             print("WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
                   file=sys.stderr)
         return actions
@@ -419,3 +431,49 @@ def in_city(pos, game, team):
         return citytile is not None and citytile.team == team
     except:
         return False
+
+
+
+
+class TTA:            
+    def vertical_flip(self, state):
+        """
+        swap north(=0) and south(=2)
+        """
+        # flip up/down
+        state = state.transpose(2,1,0)  #(c,x,y) -> (y,x,c)
+        state = np.flipud(state).copy()
+        state = state.transpose(2,1,0)  # (w,h,c) -> (c,w,h)
+        return state
+
+    def horizontal_flip(self, state):
+        """
+        swap west(=1) and east(=3)
+        """
+        # flip left/right
+        state = state.transpose(2,1,0) #(x,y,c) -> (y,x,c)
+        state = np.fliplr(state).copy()
+        state = state.transpose(2,1,0)  # (w,h,c) -> (c,w,h)
+        return state
+    
+    def all_flip(self, state):
+        state = self.vertical_flip(state)
+        state = self.horizontal_flip(state)
+        return state
+
+    def random_roll(self, state):
+        n = random.randint(-5, 5)
+        m = random.randint(-5, 5)
+        return np.roll(state, (n,m), axis=(1,2))
+
+    def vertical_convert_action(self, action):
+        order = [2,1,0,3,4]
+        return action[order]
+
+    def horizontal_convert_action(self, action):
+        order = [0,3,2,1,4]
+        return action[order]
+    
+    def all_convert_action(self, action):
+        order = [2,3,0,1,4]
+        return action[order]

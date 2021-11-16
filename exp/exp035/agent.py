@@ -1,5 +1,3 @@
-from stable_baselines3 import PPO  # pip install stable-baselines3
-
 import os 
 import sys
 sys.path.append("../../LuxPythonEnvGym/")
