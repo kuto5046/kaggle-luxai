@@ -92,7 +92,6 @@ def smart_transfer_to_nearby(game, team, unit_id, unit, target_type_restriction=
     
     return TransferAction(team, unit_id, target_unit_id, resource_type, resource_amount)
 
-
 class BasicConv2d(nn.Module):
     def __init__(self, input_dim, output_dim, kernel_size, bn):
         super().__init__()
@@ -159,7 +158,7 @@ class AgentPolicy(AgentWithModel):
         # self.action_space = spaces.Discrete(max(len(self.actions_units), len(self.actions_cities)))
         self.action_space = spaces.Discrete(len(self.actions_units))
         self.n_stack = n_stack
-        self._n_obs_channel = 23  # base obs
+        self._n_obs_channel = 28  # base obs
         self.n_obs_channel = self._n_obs_channel + (8 * (self.n_stack-1))  # base obs + last obs
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float32)
         
@@ -302,6 +301,56 @@ class AgentPolicy(AgentWithModel):
             self.last_unit_obs.pop(0)
         assert len(self.last_unit_obs) == self.n_stack - 1
 
+    def prob_unit_destroy_next_turn(self, game, _unit):
+        # resource < 4 & is not on city tile & is not adjacent resource
+        current_cell = game.map.get_cell(_unit.pos.x, _unit.pos.y)
+        current_adjacent_cells = game.map.get_adjacent_cells(current_cell)
+        current_resource_count = np.sum([cell.resource is not None for cell in current_adjacent_cells]*1)
+        if (np.sum(list(_unit.cargo.values())) < 4)& \
+            (not current_cell.is_city_tile) & \
+            (current_resource_count == 0):
+
+            adjacent_city_tile_count = 0
+            for cell in current_adjacent_cells:
+                if cell.is_city_tile:
+                    adjacent_city_tile_count += 1
+
+            next_resource_count = 0
+            for d in ['c', 'n', 'w', 's', 'e']:
+                next_adjacent_cells = game.map.get_adjacent_cells(_unit.pos.translate(d, 1))
+                for cell in next_adjacent_cells:
+                    if cell.resource is not None:
+                        next_resource_count += 1
+
+            # 必ず消滅する
+            # 隣接cellにもcitytileがない&resourceに隣接していない場合
+            if (adjacent_city_tile_count == 0)|(next_resource_count == 0):
+                return 1
+            else:  # 消失する可能性がある
+                return 0.5
+        else:  # 消失しない
+            return 0
+
+    def get_convert_fuel_loss(self, _unit):
+        # convert loss from resource to fuel in night turn      
+        coal_loss = 0
+        uranium_loss = 0 
+        consume_resource_in_night = {'wood': 0,  'coal': 0, 'uranium': 0}
+        for r_name, amt in _unit.cargo.items():
+            for i in range(amt):
+                if np.sum(consume_resource_in_night.values) < 4:
+                    consume_resource_in_night[r_name] += 1
+                else:
+                    break
+        # wood's fuel rate is 1, so wood_loss is always zero.
+        if consume_resource_in_night["coal"] > 0:
+            coal_loss = (GAME_CONSTANTS["PARAMETERS"]["RESOURCE_TO_FUEL_RATE"]["COAL"] - 1)*consume_resource_in_night["coal"]
+        if consume_resource_in_night["uranium"] > 0:
+            uranium_loss = (GAME_CONSTANTS["PARAMETERS"]["RESOURCE_TO_FUEL_RATE"]["URANIUM"] - 1)*consume_resource_in_night["uranium"]
+        loss = coal_loss + uranium_loss
+        return loss 
+
+        
     def get_base_observation(self, game, team, last_unit_obs):
         """
         Implements getting a observation from the current game for this unit or city
@@ -325,6 +374,12 @@ class AgentPolicy(AgentWithModel):
             resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
             b[2:5, x,y] += (1, cooldown, resource)
 
+            if game.state["turn"]%40 >= 30:
+                loss = self.get_convert_fuel_loss(_unit)
+                b[23, x,y] = loss / 156  # max is 4*(40-1)=156
+        
+            b[24,x,y] = self.prob_unit_destroy_next_turn(game, _unit)
+
         for _unit in game.state["teamStates"][opponent_team]["units"].values():
             x = _unit.pos.x + x_shift
             y = _unit.pos.y + y_shift
@@ -332,8 +387,18 @@ class AgentPolicy(AgentWithModel):
             cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"] 
             resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
             b[5:8, x,y] += (1, cooldown, resource)
+            
+            b[25,x,y] = self.prob_unit_destroy_next_turn(game, _unit)
+
+        own_city_tile_count = 0
+        for city in game.cities.values():
+            for cell in city.city_cells:
+                if city.team == team:
+                    own_city_tile_count += 1
 
         # city tile
+        own_unit_count = len(game.state["teamStates"][team]["units"].values())
+        own_incremental_rp = 0
         for city in game.cities.values():
             fuel = city.fuel
             lightupkeep = city.get_light_upkeep()
@@ -345,8 +410,18 @@ class AgentPolicy(AgentWithModel):
                 cooldown = cell.city_tile.cooldown / max_cooldown
                 if city.team == team:
                     b[8:11, x, y] = (1, fuel_ratio, cooldown)
+                    # 現ターンのcity行動により増えるunit
+                    if own_unit_count < own_city_tile_count:
+                        b[26, x,y] = 1
+                        own_unit_count += 1    
+                    elif game.state["teamStates"][team]["researchPoints"] < 200:
+                        own_incremental_rp += 1
                 else:
                     b[11:14, x, y] = (1, fuel_ratio, cooldown)
+   
+
+        # 現ターンのcity行動により増えるrp
+        b[27, :] = min(game.state["teamStates"][team]["researchPoints"]+own_incremental_rp, 200) / 200
 
         # resource
         resource_dict = {'wood': 14, 'coal': 15, 'uranium': 16}
@@ -378,6 +453,7 @@ class AgentPolicy(AgentWithModel):
         
         # map
         b[22, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
+
 
         if self.n_stack > 1:
             additional_obs = np.concatenate(last_unit_obs, axis=0)

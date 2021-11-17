@@ -39,8 +39,7 @@ sys.path.append("../../")
 from agents.imitation.agent_policy import ImitationAgent
 sys.path.append("../../LuxPythonEnvGym")
 from luxai2021.env.agent import Agent
-from luxai2021.env.lux_env import (LuxEnvironment, SaveReplayAndModelCallback,
-                                   CustomEnvWrapper)
+from luxai2021.env.lux_env import LuxEnvironment, SaveReplayAndModelCallback
 from luxai2021.game.constants import LuxMatchConfigs_Default, LuxMatchConfigs_Replay
 from luxai2021.game.game import Game
 
@@ -67,7 +66,7 @@ def make_env(local_env, rank, seed=0):
 
     def _init():
         local_env.seed(seed + rank)
-        return CustomEnvWrapper(local_env)
+        return local_env
 
     set_random_seed(seed)
     return _init
@@ -172,6 +171,7 @@ def create_dataset_from_json(episode_dir, data_dir, target_sub_id_list=[], team_
     df.to_csv(data_dir + 'data.csv', index=False)
     return df
 
+"""
 # Input for Neural Network
 def make_input(obs, unit_id, n_obs_channel):
     width, height = obs['width'], obs['height']
@@ -257,6 +257,7 @@ def make_input(obs, unit_id, n_obs_channel):
     b[22, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
 
     return b
+""" 
 
 # Input for Neural Network
 def make_last_input(obs):
@@ -348,7 +349,9 @@ class LuxDataset(Dataset):
         self.n_obs_channel = n_obs_channel
         self.n_stack = n_stack
         self.phase = phase
-        
+        self.agent = AgentPolicy()
+ 
+
     def __len__(self):
         return len(self.actions)
 
@@ -361,7 +364,17 @@ class LuxDataset(Dataset):
         step = int(obs_id.split("_")[1])
         with open(self.data_dir + f"{obs_id}.pickle", mode="rb") as f:    
             obs = pickle.load(f)
-        state = make_input(obs, unit_id, self.n_obs_channel)
+        # state = make_input(obs, unit_id, self.n_obs_channel)
+    
+        configs = LuxMatchConfigs_Replay
+        configs["width"] = obs["width"]
+        configs["height"] = obs["height"]
+        game = Game(configs)
+        game.reset(obs["updates"])
+        team = obs["player"]
+        unit = game.get_unit(team, unit_id)
+        base_state = self.agent.get_base_observation(game, team, last_unit_obs=None)
+        state = self.agent.get_observation(game, unit, None, team, False, base_state)
 
         for i in range(1, self.n_stack):
             if os.path.exists(self.data_dir + f"{ep_id}_{step-i}.pickle"):
@@ -371,6 +384,7 @@ class LuxDataset(Dataset):
             else:
                 last_state = np.zeros((8, 32, 32), dtype=np.float32)
             state = np.concatenate([state, last_state], axis=0)
+    
         assert state.shape[0] == self.n_obs_channel + 8*(self.n_stack-1)
 
         if self.phase == 'train':
@@ -468,7 +482,7 @@ def main():
         print(f"{unit_action_names[action]}:{len(_df)}")
 
     action_space = spaces.Discrete(7)
-    _n_obs_channel = 23
+    _n_obs_channel = 28
     n_obs_channel = _n_obs_channel + 8*(n_stack-1)
     observation_space = spaces.Box(low=0, high=1, shape=(n_obs_channel, 32, 32), dtype=np.float16)
 

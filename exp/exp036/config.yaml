@@ -1,6 +1,6 @@
 basic:
   seed: 42
-  run_id: None  # faithful-thunder-392  # run id in wandb
+  run_id: new_f_v1  # faithful-thunder-392  # run id in wandb
   debug: False
   method: BC
   batch_size: 2048
