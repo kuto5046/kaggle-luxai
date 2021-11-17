@@ -215,12 +215,12 @@ class ImitationAgent(Agent):
                 policy2 = tta.horizontal_convert_action(self.onnx_predict(tta.horizontal_flip(state)))
                 policy3 = tta.all_convert_action(self.onnx_predict(tta.all_flip(state)))
                 policy4 = self.onnx_predict(state)
-                policy5 = self.onnx_predict(tta.random_roll(state))
-                policy6 = self.onnx_predict(tta.random_roll(state))
-                policy7 = self.onnx_predict(tta.random_roll(state))
+                # policy5 = self.onnx_predict(tta.random_roll(state))
+                # policy6 = self.onnx_predict(tta.random_roll(state))
+                # policy7 = self.onnx_predict(tta.random_roll(state))
                 # policy = np.mean([policy1, policy5, policy6, policy7], axis=0)
-                # policy = np.mean([policy1, policy2, policy3, policy4], axis=0)
-                policy = np.mean([policy1, policy2, policy3, policy4, policy5, policy6, policy7], axis=0)
+                policy = np.mean([policy1, policy2, policy3, policy4], axis=0)
+                # policy = np.mean([policy1, policy2, policy3, policy4, policy5, policy6, policy7], axis=0)
 
                 # with torch.no_grad():
                 #     p = self.model(torch.from_numpy(state).unsqueeze(0))

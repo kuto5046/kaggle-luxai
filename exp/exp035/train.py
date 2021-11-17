@@ -21,7 +21,7 @@ from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
-from agent_policy import make_input, LuxNet
+from agent_policy import LuxNet
 import sys
 sys.path.append("../../LuxPythonEnvGym/")
 from luxai2021.game.city import City, CityTile
@@ -78,7 +78,10 @@ def make_input(obs, unit_id, n_obs_channel):
     x_shift = (32 - width) // 2
     y_shift = (32 - height) // 2
     cities = {}
-    
+    own_actionable_city_tiles = []
+    unit_count = 0
+    city_tile_count = 0
+    incremental_rp = 0
     # (c, w, h)
     # mapの最大サイズが(32,32)なのでそれに合わせている
     b = np.zeros((n_obs_channel, 32, 32), dtype=np.float32)
@@ -93,6 +96,8 @@ def make_input(obs, unit_id, n_obs_channel):
             wood = int(strs[7])
             coal = int(strs[8])
             uranium = int(strs[9])
+            team = int(strs[2])
+            cooldown = float(strs[6])
             if unit_id == strs[3]:
                 # Position and Cargo
                 b[:2, x, y] = (
@@ -101,14 +106,15 @@ def make_input(obs, unit_id, n_obs_channel):
                 )
             else:
                 # Units
-                team = int(strs[2])
-                cooldown = float(strs[6])
                 idx = 2 + (team - obs['player']) % 2 * 3
                 b[idx:idx + 3, x, y] += (
                     1,
                     cooldown / 6,
                     (wood + coal + uranium) / 2000
-                )
+                )            
+            if team == obs["player"]:
+                unit_count += 1
+
         elif input_identifier == 'ct':
             # CityTiles
             team = int(strs[1])
@@ -116,6 +122,10 @@ def make_input(obs, unit_id, n_obs_channel):
             x = int(strs[3]) + x_shift
             y = int(strs[4]) + y_shift
             cooldown = int(strs[5])
+            if team == obs["player"]:
+                city_tile_count += 1
+                if cooldown==0:
+                    own_actionable_city_tiles.append((x,y, city_id))
             idx = 8 + (team - obs['player']) % 2 * 3
             b[idx:idx + 3, x, y] = (
                 1,
@@ -153,6 +163,15 @@ def make_input(obs, unit_id, n_obs_channel):
     # Map Size
     b[22, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
 
+    # 現ターンのcity行動により増えるunit
+    for (x,y,city_id) in own_actionable_city_tiles:
+        if unit_count < city_tile_count:
+            b[23, x,y] = 1
+            unit_count += 1    
+        elif rp < 200:
+            incremental_rp += 1
+    # 現ターンのcity行動により増えるrp
+    b[24,] = min(rp+incremental_rp, 200) / 200
     return b
 
 
@@ -242,7 +261,7 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
         with open(filepath) as f:
             json_load = json.load(f)
 
-        if json_load['other']['SubmissionId'] not in target_sub_id_list:
+        if (len(target_sub_id_list)>0)&(json_load['other']['SubmissionId'] not in target_sub_id_list):
             continue
 
         ep_id = json_load['info']['EpisodeId']
@@ -363,11 +382,11 @@ class LuxDataset(Dataset):
             state = np.concatenate([state, last_state], axis=0)
         assert state.shape[0] == self.n_obs_channel + 8*(self.n_stack-1)
 
-        if self.phase == 'train':
-            if random.random() < 0.3:
-                state, action = horizontal_flip(state, action)
-            if random.random() < 0.3:
-                state, action = vertical_flip(state, action)  
+        # if self.phase == 'train':
+        #     if random.random() < 0.3:
+        #         state, action = horizontal_flip(state, action)
+        #     if random.random() < 0.3:
+        #         state, action = vertical_flip(state, action)  
 
         return state, action
 
@@ -428,7 +447,7 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
             traced.save('jit_best.pth')
             torch.save(model.cpu().state_dict(), 'best.pth')
             dummy_input = states[0].unsqueeze(0).cpu()
-            torch.onnx.export(model.cpu(), dummy_input, f"best_epoch{epoch}.onnx",input_names=['input_1'])
+            torch.onnx.export(model.cpu(), dummy_input, f"best.onnx",input_names=['input_1'])
             best_acc = epoch_acc
 
         if scheduler is not None:
@@ -439,10 +458,12 @@ def main():
     seed_everything(seed)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
-    episode_dir = '../../input/lux_ai_toad1800_episodes_1108/'
+    team_name = "Love Deluxe"   # "Toad Brigade"
+    episode_dir = '../../input/lux_ai_love1700_episodes_1117/'
+    # episode_dir = '../../input/lux_ai_toad1800_episodes_1108/'
     data_dir = "./tmp_data/"
-    target_sub_id_list = [23032370]  # [23281649, 23297953]  # 23032370
-    df = create_dataset_from_json(episode_dir, data_dir, only_win=True, target_sub_id_list=target_sub_id_list)
+    target_sub_id_list = [23243815]  #, 23303548, 23381067, 23469931, 23582519]  # [23281649, 23297953]  # 23032370
+    df = create_dataset_from_json(episode_dir, data_dir, team_name=team_name, only_win=True, target_sub_id_list=target_sub_id_list)
     logger.info(f"obses:{df['obs_id'].nunique()} samples:{len(df)}")
     n_stack = 1
 
@@ -450,7 +471,7 @@ def main():
     actions = ['north', 'west', 'south', 'east', 'bcity']
     for value, count in zip(*np.unique(labels, return_counts=True)):
         logger.info(f'{actions[value]:^5}: {count:>3}')
-    _n_obs_channel = 23
+    _n_obs_channel = 25
     n_obs_channel = _n_obs_channel + 8*(n_stack-1)
     observation_space = spaces.Box(low=0, high=1, shape=(n_obs_channel, 32, 32), dtype=np.float16)
     model = LuxNet(observation_space=observation_space, features_dim=len(actions))
