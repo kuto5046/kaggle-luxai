@@ -1,11 +1,12 @@
 basic:
   seed: 42
-  run_id: new_f_v1  # faithful-thunder-392  # run id in wandb
+  run_id: b2048_dim128_2head_v1  # faithful-thunder-392  # run id in wandb
   debug: False
   method: BC
-  batch_size: 64
+  batch_size: 2048
   n_stack: 1
   n_envs: 1
+  features_dim: 128
 
 trajectory:
   episode_dir: ../../input/lux_ai_toad1800_episodes_1108/
@@ -15,6 +16,6 @@ trajectory:
 
 BC:
   trainer_params:
-    n_epochs: 1
-    log_interval: 3000
+    n_epochs: 10
+    log_interval: 100
     reset_tensorboard: True

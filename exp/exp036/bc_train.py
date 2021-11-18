@@ -445,6 +445,7 @@ def main():
     method = config["basic"]["method"]
     n_stack = config["basic"]["n_stack"]
     n_envs = config["basic"]["n_envs"]
+    features_dim = config["basic"]["features_dim"]
     data_dir = config["trajectory"]["data_dir"]
     episode_dir = config["trajectory"]["episode_dir"]
     only_win = config["trajectory"]["only_win"]
@@ -506,10 +507,10 @@ def main():
             observation_space=observation_space, 
             action_space=action_space, 
             lr_schedule=ConstantLRSchedule(lr=1e-3),
-            # net_arch = [dict(pi=[64], vf=[64])],
+            net_arch = [dict(pi=[features_dim], vf=[features_dim])],
             optimizer_class=torch.optim.AdamW,
             features_extractor_class=LuxNet,
-            features_extractor_kwargs=dict(features_dim=64)
+            features_extractor_kwargs=dict(features_dim=features_dim)
             )
 
         bc_trainer = BC(
