@@ -482,7 +482,7 @@ def main():
         print(f"{unit_action_names[action]}:{len(_df)}")
 
     action_space = spaces.Discrete(7)
-    _n_obs_channel = 28
+    _n_obs_channel = 23  # 28
     n_obs_channel = _n_obs_channel + 8*(n_stack-1)
     observation_space = spaces.Box(low=0, high=1, shape=(n_obs_channel, 32, 32), dtype=np.float16)
 
@@ -506,7 +506,7 @@ def main():
             observation_space=observation_space, 
             action_space=action_space, 
             lr_schedule=ConstantLRSchedule(lr=1e-3),
-            net_arch = [dict(pi=[64], vf=[64])],
+            # net_arch = [dict(pi=[64], vf=[64])],
             optimizer_class=torch.optim.AdamW,
             features_extractor_class=LuxNet,
             features_extractor_kwargs=dict(features_dim=64)
