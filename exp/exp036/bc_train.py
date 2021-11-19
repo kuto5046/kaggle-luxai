@@ -18,7 +18,8 @@ import pathlib
 import pickle
 import tempfile
 import torch
-import json 
+import json
+from torch._C import _cuda_resetAccumulatedMemoryStats 
 import yaml
 import wandb  
 import ast 
@@ -31,7 +32,7 @@ from stable_baselines3.common import policies
 from imitation.algorithms.bc import BC, ConstantLRSchedule
 from imitation.algorithms.adversarial import airl, gail
 from torch.utils.data import Dataset, DataLoader
-from agent_policy import AgentPolicy, LuxNet
+from agent_policy import AgentPolicy, CustomFeatureExtractor, CustomActorCriticCnnPolicy
 from sklearn.metrics import confusion_matrix
 from imitation.util import logger, util
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -431,6 +432,20 @@ def valid_model(model, val_loader, label):
     epoch_acc = epoch_acc/ data_size
     print({'acc': epoch_acc})
 
+
+class OnnxablePolicy(torch.nn.Module):
+    def __init__(self, feature_extractor, mlp_extractor, action_net, value_net):
+        super(OnnxablePolicy, self).__init__()
+        self.feature_extractor = feature_extractor
+        self.mlp_extractor = mlp_extractor
+        self.action_net = action_net
+        self.value_net = value_net
+
+    def forward(self, observation):
+        features = self.feature_extractor(observation)
+        action_hidden, value_hidden = self.extractor(features)
+        return self.action_net(action_hidden), self.value_net(value_hidden)
+
 def main():
     ############
     #  config
@@ -503,13 +518,13 @@ def main():
     )
     if method == "BC":
         bc_logger = logger.configure(folder="./logs/", format_strs=["stdout", "tensorboard"])
-        policy = policies.ActorCriticCnnPolicy(
+        policy = CustomActorCriticCnnPolicy(
             observation_space=observation_space, 
             action_space=action_space, 
             lr_schedule=ConstantLRSchedule(lr=1e-3),
             net_arch = [dict(pi=[features_dim], vf=[features_dim])],
             optimizer_class=torch.optim.AdamW,
-            features_extractor_class=LuxNet,
+            features_extractor_class=CustomFeatureExtractor,
             features_extractor_kwargs=dict(features_dim=features_dim)
             )
 
@@ -533,7 +548,17 @@ def main():
             # log_rollouts_venv=env,
             **bc_trainer_params)
         bc_trainer.save_policy(f'./models/bc_policy_{run_id}')
+        bc_trainer.policy.to("cpu")
+        onnxable_model = OnnxablePolicy(
+            bc_trainer.policy.features_extractor, 
+            bc_trainer.policy.mlp_extractor, 
+			bc_trainer.policy.action_net,
+            bc_trainer.policy.value_net
+            )
+        dummy_input = torch.randn(1, n_obs_channel, 32, 32)
+        torch.onnx.export(onnxable_model, dummy_input, "my_ppo_model.onnx", opset_version=9)
         valid_model(bc_trainer, val_loader, unit_action_names)
+        
 
     # elif method == "GAIL":
     #     policy_kwargs = dict(

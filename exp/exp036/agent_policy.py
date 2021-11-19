@@ -9,6 +9,7 @@ from luxai2021.env.agent import Agent, AgentWithModel
 from luxai2021.game.actions import *
 from luxai2021.game.game_constants import GAME_CONSTANTS
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from stable_baselines3.common.policies import ActorCriticCnnPolicy, ActorCriticPolicy
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -107,7 +108,7 @@ class BasicConv2d(nn.Module):
         return h
 
     
-class LuxNet(BaseFeaturesExtractor):
+class CustomFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim):
         super(LuxNet, self).__init__(observation_space, features_dim)
         layers, filters = 12, 32
@@ -128,6 +129,56 @@ class LuxNet(BaseFeaturesExtractor):
         h_avg = h.view(h.size(0), h.size(1), -1).mean(-1)
         output = self.head(torch.cat([h_head, h_avg], dim=1))  # filter -> features_dim
         return output
+
+
+class CustomMlpExtractor(nn.Module):
+    """
+    Custom network for policy and value function.
+    It receives as input the features extracted by the feature extractor.
+
+    :param feature_dim: dimension of the features extracted with the features_extractor (e.g. features from a CNN)
+    :param last_layer_dim_pi: (int) number of units for the last layer of the policy network
+    :param last_layer_dim_vf: (int) number of units for the last layer of the value network
+    """
+
+    def __init__(
+        self,
+        features_dim: int,
+        last_layer_dim_pi: int = 64,
+        last_layer_dim_vf: int = 64,
+    ):
+        super(CustomMlpExtractor, self).__init__()
+
+        # IMPORTANT:
+        # Save output dimensions, used to create the distributions
+        self.latent_dim_pi = last_layer_dim_pi
+        self.latent_dim_vf = last_layer_dim_vf
+
+        # Policy network
+        self.policy_net = nn.Sequential(
+            nn.Linear(features_dim, last_layer_dim_pi), 
+            nn.BatchNorm1d(last_layer_dim_pi),
+            nn.ReLU(),
+        )
+        # Value network
+        self.value_net = nn.Sequential(
+            nn.Linear(features_dim, last_layer_dim_vf),
+            nn.BatchNorm1d(last_layer_dim_vf),
+            nn.ReLU(),
+        )
+
+    def forward(self, features):
+        """
+        :return: (th.Tensor, th.Tensor) latent_policy, latent_value of the specified network.
+            If all layers are shared, then ``latent_policy == latent_value``
+        """
+        return self.policy_net(features), self.value_net(features)
+
+
+class CustomActorCriticCnnPolicy(ActorCriticCnnPolicy):
+    def _build_mlp_extractor(self) -> None:
+        self.mlp_extractor = CustomMlpExtractor(self.features_dim)
+
 
 class AgentPolicy(AgentWithModel):
     def __init__(self, mode="train", model=None, n_stack=1) -> None:
@@ -250,7 +301,7 @@ class AgentPolicy(AgentWithModel):
                             actions.append(action)
                             unit_count += 1
                         # # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
-                        if game.state["teamStates"][team]["researchPoints"] < 200:
+                        elif game.state["teamStates"][team]["researchPoints"] < 200:
                             action = ResearchAction(team, x, y, None)
                             actions.append(action)
                             game.state["teamStates"][team]["researchPoints"] += 1
@@ -582,5 +633,5 @@ class AgentPolicy(AgentWithModel):
             game ([type]): Game in progress
             is_first_turn (bool): True if it's the first turn of a game.
         """
-        actions = self.process_unit_turn(game, self.team)
+        actions = self.process_city_turn(game, self.team)
         self.match_controller.take_actions(actions)
