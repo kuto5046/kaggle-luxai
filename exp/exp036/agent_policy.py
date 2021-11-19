@@ -1,7 +1,7 @@
 import sys
 import time
 from functools import partial  # pip install functools
-
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import numpy as np
 from gym import spaces
 sys.path.append("../../LuxPythonEnvGym")
@@ -13,6 +13,7 @@ from stable_baselines3.common.policies import ActorCriticCnnPolicy, ActorCriticP
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
+import gym 
 
 def smart_transfer_to_nearby(game, team, unit_id, unit, target_type_restriction=None, **kwarg):
     """
@@ -110,7 +111,7 @@ class BasicConv2d(nn.Module):
     
 class CustomFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim):
-        super(LuxNet, self).__init__(observation_space, features_dim)
+        super(CustomFeatureExtractor, self).__init__(observation_space, features_dim)
         layers, filters = 12, 32
         self.n_obs_channel = observation_space.shape[0]
         self.conv0 = BasicConv2d(self.n_obs_channel, filters, (3, 3), False)
@@ -181,7 +182,7 @@ class CustomActorCriticCnnPolicy(ActorCriticCnnPolicy):
 
 
 class AgentPolicy(AgentWithModel):
-    def __init__(self, mode="train", model=None, n_stack=1) -> None:
+    def __init__(self, mode="train", model=None, _n_obs_channel=23, n_stack=1) -> None:
         """
         Arguments:
             mode: "train" or "inference", which controls if this agent is for training or not.
@@ -202,7 +203,7 @@ class AgentPolicy(AgentWithModel):
         ]
         self.action_space = spaces.Discrete(len(self.actions_units))
         self.n_stack = n_stack
-        self._n_obs_channel = 23  #  28  # base obs
+        self._n_obs_channel = _n_obs_channel  #  28  # base obs
         self.n_obs_channel = self._n_obs_channel + (8 * (self.n_stack-1))  # base obs + last obs
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float32)
         self.object_nodes = {}
@@ -316,6 +317,9 @@ class AgentPolicy(AgentWithModel):
                 obs = self.get_observation(game, unit, None, unit.team, False, base_obs)
                 policy, value, _ = self.model.policy(obs)
                 for action_code in np.argsort(policy)[::-1]:
+                    # 夜でcity上にいない場合はbuild cityはしない
+                    # if (action_code == 6)&(game.is_night())&(not game.game_map_by_pos(unit.pos).is_city_tile):
+                    #     continue 
                     action = self.action_code_to_action(action_code, game=game, unit=unit, city_tile=None, team=unit.team)
                     if action.is_valid(game, actions):
                         actions.append(action)
@@ -331,7 +335,7 @@ class AgentPolicy(AgentWithModel):
         start_time = time.time()
         base_obs = self.get_base_observation(game, team, self.last_unit_obs)
         unit_actions = self.process_unit_turn(game, team, base_obs)
-        city_actions = self.process_turn(game, team)
+        city_actions = self.process_city_turn(game, team)
         actions = unit_actions + city_actions
 
         if self.n_stack > 1:
@@ -351,6 +355,9 @@ class AgentPolicy(AgentWithModel):
         assert len(self.last_unit_obs) == self.n_stack - 1
 
     def prob_unit_destroy_next_turn(self, game, _unit):
+        """
+
+        """
         # resource < 4 & is not on city tile & is not adjacent resource
         current_cell = game.map.get_cell(_unit.pos.x, _unit.pos.y)
         current_adjacent_cells = game.map.get_adjacent_cells(current_cell)
@@ -387,15 +394,13 @@ class AgentPolicy(AgentWithModel):
         consume_resource_in_night = {'wood': 0,  'coal': 0, 'uranium': 0}
         for r_name, amt in _unit.cargo.items():
             for i in range(amt):
-                if np.sum(consume_resource_in_night.values) < 4:
+                if np.sum(list(consume_resource_in_night.values())) < 4:
                     consume_resource_in_night[r_name] += 1
                 else:
                     break
         # wood's fuel rate is 1, so wood_loss is always zero.
-        if consume_resource_in_night["coal"] > 0:
-            coal_loss = (GAME_CONSTANTS["PARAMETERS"]["RESOURCE_TO_FUEL_RATE"]["COAL"] - 1)*consume_resource_in_night["coal"]
-        if consume_resource_in_night["uranium"] > 0:
-            uranium_loss = (GAME_CONSTANTS["PARAMETERS"]["RESOURCE_TO_FUEL_RATE"]["URANIUM"] - 1)*consume_resource_in_night["uranium"]
+        coal_loss = (GAME_CONSTANTS["PARAMETERS"]["RESOURCE_TO_FUEL_RATE"]["COAL"] - 1)*consume_resource_in_night["coal"]
+        uranium_loss = (GAME_CONSTANTS["PARAMETERS"]["RESOURCE_TO_FUEL_RATE"]["URANIUM"] - 1)*consume_resource_in_night["uranium"]
         loss = coal_loss + uranium_loss
         return loss 
    
@@ -422,11 +427,12 @@ class AgentPolicy(AgentWithModel):
             resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
             b[2:5, x,y] += (1, cooldown, resource)
 
-            # if game.state["turn"]%40 >= 30:
-            #     loss = self.get_convert_fuel_loss(_unit)
-            #     b[23, x,y] = loss / 156  # max is 4*(40-1)=156
+            # in night
+            if game.state["turn"]%40 >= 30:
+                loss = self.get_convert_fuel_loss(_unit)
+                b[23, x,y] = loss / 156  # max is 4*(40-1)=156
         
-            # b[24,x,y] = self.prob_unit_destroy_next_turn(game, _unit)
+            b[26,x,y] = self.prob_unit_destroy_next_turn(game, _unit)
 
         for _unit in game.state["teamStates"][opponent_team]["units"].values():
             x = _unit.pos.x + x_shift
@@ -436,7 +442,7 @@ class AgentPolicy(AgentWithModel):
             resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
             b[5:8, x,y] += (1, cooldown, resource)
             
-            # b[25,x,y] = self.prob_unit_destroy_next_turn(game, _unit)
+            b[27,x,y] = self.prob_unit_destroy_next_turn(game, _unit)
 
         own_city_tile_count = 0
         for city in game.cities.values():
@@ -459,17 +465,16 @@ class AgentPolicy(AgentWithModel):
                 if city.team == team:
                     b[8:11, x, y] = (1, fuel_ratio, cooldown)
                     # 現ターンのcity行動により増えるunit
-                    # if own_unit_count < own_city_tile_count:
-                    #     b[26, x,y] = 1
-                    #     own_unit_count += 1    
-                    # elif game.state["teamStates"][team]["researchPoints"] < 200:
-                    #     own_incremental_rp += 1
+                    if own_unit_count < own_city_tile_count:
+                        b[24, x,y] = 1
+                        own_unit_count += 1    
+                    elif game.state["teamStates"][team]["researchPoints"] < 200:
+                        own_incremental_rp += 1
                 else:
                     b[11:14, x, y] = (1, fuel_ratio, cooldown)
    
-
         # 現ターンのcity行動により増えるrp
-        # b[27, :] = min(game.state["teamStates"][team]["researchPoints"]+own_incremental_rp, 200) / 200
+        b[25, :] = min(game.state["teamStates"][team]["researchPoints"]+own_incremental_rp, 200) / 200
 
         # resource
         resource_dict = {'wood': 14, 'coal': 15, 'uranium': 16}
@@ -501,7 +506,6 @@ class AgentPolicy(AgentWithModel):
         
         # map
         b[22, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
-
 
         if self.n_stack > 1:
             additional_obs = np.concatenate(last_unit_obs, axis=0)

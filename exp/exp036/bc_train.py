@@ -342,15 +342,15 @@ def horizontal_flip(state, action):
     return state, action
 
 class LuxDataset(Dataset):
-    def __init__(self, df, data_dir, n_obs_channel=23, n_stack=1, phase="train"):
+    def __init__(self, df, data_dir, _n_obs_channel=23, n_stack=1, phase="train"):
         self.actions = df['action'].to_numpy()
         self.obs_ids = df['obs_id'].to_numpy()
         self.unit_ids = df['unit_id'].to_numpy()
         self.data_dir = data_dir 
-        self.n_obs_channel = n_obs_channel
+        self._n_obs_channel = _n_obs_channel
         self.n_stack = n_stack
         self.phase = phase
-        self.agent = AgentPolicy()
+        self.agent = AgentPolicy(_n_obs_channel=_n_obs_channel)
  
 
     def __len__(self):
@@ -386,7 +386,7 @@ class LuxDataset(Dataset):
                 last_state = np.zeros((8, 32, 32), dtype=np.float32)
             state = np.concatenate([state, last_state], axis=0)
     
-        assert state.shape[0] == self.n_obs_channel + 8*(self.n_stack-1)
+        assert state.shape[0] == self._n_obs_channel + 8*(self.n_stack-1)
 
         if self.phase == 'train':
             if random.random() < 0.3:
@@ -415,14 +415,15 @@ def valid_model(model, val_loader, label):
     epoch_acc = 0
     all_preds = []
     all_targets = []
+    model.policy.to('cpu')
     for item in tqdm(val_loader, leave=False):
         states = item["obs"].cpu().float()
         actions = item["acts"].cpu().long()
         with torch.no_grad():
-            preds, _ = model.policy.predict(states)
+            preds, _, _ = model.policy(states)
         
-        epoch_acc += np.sum(preds == actions.numpy())
-        all_preds.append(preds)
+        epoch_acc += np.sum(preds.numpy() == actions.numpy())
+        all_preds.append(preds.numpy())
         all_targets.append(actions.numpy())
     y_pred = np.concatenate(all_preds)
     y_true = np.concatenate(all_targets)
@@ -443,7 +444,7 @@ class OnnxablePolicy(torch.nn.Module):
 
     def forward(self, observation):
         features = self.feature_extractor(observation)
-        action_hidden, value_hidden = self.extractor(features)
+        action_hidden, value_hidden = self.mlp_extractor(features)
         return self.action_net(action_hidden), self.value_net(value_hidden)
 
 def main():
@@ -498,7 +499,7 @@ def main():
         print(f"{unit_action_names[action]}:{len(_df)}")
 
     action_space = spaces.Discrete(7)
-    _n_obs_channel = 23  # 28
+    _n_obs_channel = 28
     n_obs_channel = _n_obs_channel + 8*(n_stack-1)
     observation_space = spaces.Box(low=0, high=1, shape=(n_obs_channel, 32, 32), dtype=np.float16)
 
@@ -547,6 +548,7 @@ def main():
         bc_trainer.train(
             # log_rollouts_venv=env,
             **bc_trainer_params)
+        valid_model(bc_trainer, val_loader, unit_action_names)
         bc_trainer.save_policy(f'./models/bc_policy_{run_id}')
         bc_trainer.policy.to("cpu")
         onnxable_model = OnnxablePolicy(
@@ -556,8 +558,7 @@ def main():
             bc_trainer.policy.value_net
             )
         dummy_input = torch.randn(1, n_obs_channel, 32, 32)
-        torch.onnx.export(onnxable_model, dummy_input, "my_ppo_model.onnx", opset_version=9)
-        valid_model(bc_trainer, val_loader, unit_action_names)
+        torch.onnx.export(onnxable_model, dummy_input, "bc_policy.onnx", opset_version=9)
         
 
     # elif method == "GAIL":
