@@ -180,58 +180,10 @@ class ImitationAgent(Agent):
         """
         pass
 
-    def process_turn(self, game, team):
-        """
-        Decides on a set of actions for the current turn. Not used in training, only inference. Generally
-        don't modify this part of the code.
-        Returns: Array of actions to perform.
-        """
-        
-        start_time = time.time()
-        # in vectolized environment, inference model is very slow
-        # So I use onnx model and load model in each turn
-        if self.model is None:
-            print("[Imitation Agent]load onnx model")
-            self.model = ort.InferenceSession(self.model_path)
+
+    def process_city_turn(self, game, team):
         actions = []
-        new_turn = True
-
-        # Inference the model per-unit
-        dest = []
-        units = game.state["teamStates"][team]["units"].values()
-        unit_count = len(units)
-        base_state = self.get_base_observation(game, team)
-        
-        # batch_state = []
-        # batch_unit = []
-        # for unit in units:
-        #     if unit.can_act() and (game.state["turn"] % 40 < 30 or not in_city(unit.pos, game, team)):
-        #         state = self.get_observation(game, unit, team, base_state)
-        #         batch_state.append(state)
-        #         batch_unit.append(unit)
-        # batch_size = len(batch_state)
-        # if batch_size > 0:
-        #     states = torch.from_numpy(np.stack(batch_state))
-        #     with torch.no_grad():
-        #         policies = self.model(states).numpy()
-        #     for i in range(batch_size):
-        #         action, pos = self.action_code_to_action(policies[i], game, unit=batch_unit[i], dest=dest, team=team)
-
-        for unit in units:
-            if unit.can_act() and (game.state["turn"] % 40 < 30 or not in_city(unit.pos, game, team)):
-                state = self.get_observation(game, unit, team, base_state)
-                # with torch.no_grad():
-                #     p = self.model(torch.from_numpy(state).unsqueeze(0))
-                # policy = p.squeeze(0).numpy()
-                policy = self.onnx_predict(state)
-                action, pos = self.action_code_to_action(policy, game, unit=unit, dest=dest, team=team)
-                
-                if action is not None:
-                    actions.append(action)
-                if pos is not None:
-                    dest.append(pos)
-                new_turn = False
-
+        unit_count = len(game.get_teams_units(team))
         # city
         city_tile_count = 0
         for city in game.cities.values():
@@ -239,7 +191,7 @@ class ImitationAgent(Agent):
                 if city.team == team:
                     city_tile_count += 1
 
-        # # Inference the model per-city
+        # Inference the model per-city
         cities = game.cities.values()
         for city in cities:
             if city.team == team:
@@ -248,20 +200,52 @@ class ImitationAgent(Agent):
                     if city_tile.can_act():
                         x = city_tile.pos.x
                         y = city_tile.pos.y
-
                         # 保有unit数(worker)よりもcity tileの数が多いならworkerを追加
                         if unit_count < city_tile_count:
                             action = SpawnWorkerAction(team, None, x, y)
                             actions.append(action)
                             unit_count += 1
-
-                        # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
+                        # # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
                         elif game.state["teamStates"][team]["researchPoints"] < 200:
                             action = ResearchAction(team, x, y, None)
                             actions.append(action)
                             game.state["teamStates"][team]["researchPoints"] += 1
 
-                        new_turn = False
+        return actions 
+
+    def process_unit_turn(self, game, team, base_obs):
+        actions = []
+        units = game.get_teams_units(team)
+        for unit in units.values():  
+            if unit.can_act() and (game.state["turn"] % 40 < 30 or not in_city(unit.pos, game, team)):
+                state = self.get_observation(game, unit, team, base_obs)
+                # with torch.no_grad():
+                #     p = self.model(torch.from_numpy(state).unsqueeze(0))
+                # policy = p.squeeze(0).numpy()
+                policy = self.onnx_predict(state)
+                for action_code in np.argsort(policy)[::-1]:
+                    action = self.action_code_to_action(action_code, game=game, unit=unit, city_tile=None, team=unit.team)
+                    if action.is_valid(game, actions):
+                        actions.append(action)
+                        break      
+        return actions 
+
+    def process_turn(self, game, team):
+        """
+        Decides on a set of actions for the current turn. Not used in training, only inference. Generally
+        don't modify this part of the code.
+        Returns: Array of actions to perform.
+        """
+        start_time = time.time()
+        if self.model is None:
+            print("[Imitation Agent]load onnx model")
+            self.model = ort.InferenceSession(self.model_path)
+
+        base_obs = self.get_base_observation(game, team)
+        unit_actions = self.process_unit_turn(game, team, base_obs)
+        city_actions = self.process_city_turn(game, team)
+        actions = unit_actions + city_actions
+
         time_taken = time.time() - start_time
         if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
             print(f"[Imitation Agent]WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
@@ -366,61 +350,40 @@ class ImitationAgent(Agent):
         
         return b 
 
-    def action_code_to_action(self, policy, game, unit=None, city_tile=None, team=None, dest=[]):
+    def action_code_to_action(self, action_code, game, unit=None, city_tile=None, team=None):
         """
         Takes an action in the environment according to actionCode:
             action_code: Index of action to take into the action array.
         Returns: An action.
         """
-        for action_code in np.argsort(policy)[::-1]:
-            # Map action_code index into to a constructed Action object
-            try:
-                x = None
-                y = None
-                if city_tile is not None:
-                    x = city_tile.pos.x
-                    y = city_tile.pos.y
-                elif unit is not None:
-                    x = unit.pos.x
-                    y = unit.pos.y
-                
-                if city_tile != None:
-                    action =  self.actions_cities[action_code%len(self.actions_cities)](
-                        game=game,
-                        unit_id=unit.id if unit else None,
-                        unit=unit,
-                        city_id=city_tile.city_id if city_tile else None,
-                        citytile=city_tile,
-                        team=team,
-                        x=x,
-                        y=y
-                    )
-                else:
-                    action =  self.actions_units[action_code](
-                        game=game,
-                        unit_id=unit.id if unit else None,
-                        unit=unit,
-                        city_id=city_tile.city_id if city_tile else None,
-                        citytile=city_tile,
-                        team=team,
-                        x=x,
-                        y=y
-                    )
-                if hasattr(action, 'direction'):
-                    pos = unit.pos.translate(action.direction, 1)
-                else:
-                    pos = unit.pos 
-                    
-                if (pos not in dest) or in_city(pos, game, team):
-                    return action, pos
+        # Map action_code index into to a constructed Action object
+        try:
+            x = None
+            y = None
+            if city_tile is not None:
+                x = city_tile.pos.x
+                y = city_tile.pos.y
+            elif unit is not None:
+                x = unit.pos.x
+                y = unit.pos.y
             
-            except Exception as e:
-                # Not a valid action
-                print(e)
-                return None, None
-            
-            return None, None 
-
+            if unit is not None:
+                action = self.actions_units[action_code%len(self.actions_units)](
+                    game=game,
+                    unit_id=unit.id if unit else None,
+                    unit=unit,
+                    city_id=city_tile.city_id if city_tile else None,
+                    citytile=city_tile,
+                    team=team,
+                    x=x,
+                    y=y
+                )
+                return action
+            return None 
+        except Exception as e:
+            # Not a valid action
+            print(e)
+            return None
 
 def in_city(pos, game, team):    
     try:
