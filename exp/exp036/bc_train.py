@@ -558,9 +558,8 @@ def main():
             bc_trainer.policy.value_net
             )
         dummy_input = torch.randn(1, n_obs_channel, 32, 32)
-        torch.onnx.export(onnxable_model, dummy_input, "bc_policy.onnx", opset_version=9)
+        torch.onnx.export(onnxable_model, dummy_input, f"./models/bc_policy_{run_id}.onnx", opset_version=9)
         
-
     # elif method == "GAIL":
     #     policy_kwargs = dict(
     #         features_extractor_class=LuxNet,

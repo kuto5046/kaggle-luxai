@@ -315,7 +315,9 @@ class AgentPolicy(AgentWithModel):
         for unit in units.values():
             if unit.can_act():
                 obs = self.get_observation(game, unit, None, unit.team, False, base_obs)
-                policy, value, _ = self.model.policy(obs)
+                features = self.model.policy.extract_features(obs)
+                latent_pi, latent_vi = self.model.policy.mlp_extractor(features)
+                policy = self.model.policy.action_net(latent_pi)
                 for action_code in np.argsort(policy)[::-1]:
                     # 夜でcity上にいない場合はbuild cityはしない
                     # if (action_code == 6)&(game.is_night())&(not game.game_map_by_pos(unit.pos).is_city_tile):
@@ -428,7 +430,7 @@ class AgentPolicy(AgentWithModel):
             b[2:5, x,y] += (1, cooldown, resource)
 
             # in night
-            if game.state["turn"]%40 >= 30:
+            if game.is_night():
                 loss = self.get_convert_fuel_loss(_unit)
                 b[23, x,y] = loss / 156  # max is 4*(40-1)=156
         
