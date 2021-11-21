@@ -1,0 +1,43 @@
+basic:
+  seed: 42
+  n_envs: 24
+  step_count: 100000000 # 100M
+  pretrained_bc_path: ./models/bc_policy_simple_v1
+  pretrained_path: None # ./models/rl_cnn_model_9600000_steps.zip
+  debug: False
+
+resume:
+  is_resume: False
+  run_id: simple_v1  # upbeat-vortex-784  # run id in wandb
+  resume_num_timesteps: 0  # 9600000
+
+callbacks:  
+  eval:
+    n_envs: 4
+    params:
+      best_model_save_path: './models/'
+      log_path: './logs/'
+      eval_freq: 5  # when rollout start
+      n_eval_episodes: 4 # Run 4 games
+      deterministic: True
+      render: False
+
+  checkpoints:
+    save_freq: 50000  # 1,200,000
+    save_path: './models/'
+    name_prefix: rl_cnn_model
+    verbose: 0
+
+model:
+    _n_obs_channel: 23
+    # features_dim: 128
+    model_update_step_freq: 50000
+    n_stack: 1
+    params:
+      verbose: 0
+      tensorboard_log: "./tensorboard/"
+      learning_rate: 0.00005
+      gamma: 0.998
+      gae_lambda: 0.95
+      batch_size: 128
+      n_steps: 4096  # 8192  # 1024 * 8
