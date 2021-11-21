@@ -15,6 +15,7 @@ import cProfile
 from imitation.algorithms import bc
 import numpy as np
 import torch
+import torch.nn as nn 
 import yaml
 from stable_baselines3 import PPO  # pip install stable-baselines3
 from stable_baselines3.common import callbacks
@@ -34,8 +35,7 @@ from stable_baselines3.common.vec_env import (DummyVecEnv, SubprocVecEnv,
 from wandb.integration.sb3 import WandbCallback
 
 import wandb
-from agent_policy import AgentPolicy, LuxNet
-from stable_baselines3.common.policies import ActorCriticCnnPolicy, ActorCriticPolicy
+from agent_policy import AgentPolicy, CustomActorCriticCnnPolicy
 
 sys.path.append("../../")
 from agents.imitation.agent_policy import ImitationAgent
@@ -292,7 +292,7 @@ class CustomEvalCallback(EventCallback):
 
     def _on_rollout_start(self) -> bool:
 
-        if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
+        if self.n_calls > 0 and self.n_calls % self.eval_freq == 0:
             start_time = time.time()
             print(f"[STEP {self.num_timesteps}]Eval {self.n_eval_episodes} episodes")
             # Sync training and eval env if there is VecNormalize
@@ -458,6 +458,8 @@ def main():
     pretrained_path = config["basic"]["pretrained_path"]
     debug = config["basic"]["debug"]
 
+    _n_obs_channel = config["model"]["_n_obs_channel"]
+    # features_dim = config["model"]["features_dim"]
     model_update_step_freq = config["model"]["model_update_step_freq"]
     n_stack = config["model"]["n_stack"]
 
@@ -472,8 +474,8 @@ def main():
     seed_everything(seed)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     
-    if (not is_resume) or (run_id == "None"):
-        run_id = wandb.util.generate_id()
+    # if (not is_resume) or (run_id == "None"):
+    #     run_id = wandb.util.generate_id()
 
     mode = None
     if debug:
@@ -499,11 +501,11 @@ def main():
     ##############
     # Create a default opponent agent and a RL agent in training mode
     env = VecMonitor(SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
-                                                    learning_agent=AgentPolicy(mode="train", n_stack=n_stack),
+                                                    learning_agent=AgentPolicy(mode="train", _n_obs_channel=_n_obs_channel, n_stack=n_stack),
                                                     # opponent_agents={"imitation": ImitationAgent(id=i)},
                                                     opponent_agents={
                                                         "imitation": ImitationAgent(),
-                                                        "self-play": AgentPolicy(mode="inference", n_stack=n_stack)
+                                                        "self-play": AgentPolicy(mode="inference", _n_obs_channel=_n_obs_channel, n_stack=n_stack)
                                                         },
                                                     initial_opponent_policy="imitation",
                                                     model_update_step_freq=model_update_step_freq), i) for i in range(n_envs)]))
@@ -514,16 +516,26 @@ def main():
         model.set_env(env)
         model = load_model_params(model, model_params)
     else:
-        policy_kwargs = dict(
-            features_extractor_class=LuxNet,
-            features_extractor_kwargs=dict(features_dim=64),
-        )
+        # policy_kwargs = dict(
+        #     features_extractor_class=LuxNet,
+        #     features_extractor_kwargs=dict(features_dim=features_dim),  # TODO net_archは不要？
+        # )
         # Attach a ML model from stable_baselines3 and train a RL model
-        class BCPolicy(ActorCriticCnnPolicy):
+        class BCPolicy(CustomActorCriticCnnPolicy):
             def __new__(cls, *args, **kwargs):
-                return bc.reconstruct_policy(pretrained_bc_path)
+                policy = bc.reconstruct_policy(pretrained_bc_path)
 
-        model = PPO(BCPolicy, env, policy_kwargs=policy_kwargs, **model_params)
+                # feature extractorのparamを固定
+                for param in policy.features_extractor.parameters():
+                    param.requires_grad = False
+
+                # feature extractorの最終層だけ初期化して学習
+                # policy.features_extractor.head = nn.Linear(32, 64, bias=False)
+                # for param in policy.features_extractor.head.parameters():
+                #     param.requires_grad = True
+                return policy
+
+        model = PPO(BCPolicy, env, **model_params)
         # model = PPO("CnnPolicy", env, policy_kwargs=policy_kwargs, **model_params)
     #############
     #  callback
@@ -535,12 +547,12 @@ def main():
     # Since reward metrics don't work for multi-environment setups, we add an evaluation logger
     # # for metrics.
     # An evaluation environment is needed to measure multi-env setups. Use a fixed 4 envs.
-    env_eval = VecMonitor(SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
-                                                    learning_agent=AgentPolicy(mode="train", n_stack=n_stack),
-                                                    opponent_agents={"imitation": ImitationAgent()},
-                                                    # opponent_agents={"random": RandomAgent()},
-                                                    initial_opponent_policy="imitation"), i) for i in range(eval_n_envs)]))
-    callbacks.append(CustomEvalCallback(env_eval, **eval_params))
+    # env_eval = VecMonitor(SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
+    #                                                 learning_agent=AgentPolicy(mode="train", _n_obs_channel=_n_obs_channel, n_stack=n_stack),
+    #                                                 opponent_agents={"imitation": ImitationAgent()},
+    #                                                 # opponent_agents={"random": RandomAgent()},
+    #                                                 initial_opponent_policy="imitation"), i) for i in range(eval_n_envs)]))
+    # callbacks.append(CustomEvalCallback(env_eval, **eval_params))
     
     ###########
     # train
@@ -554,9 +566,11 @@ def main():
             model.learn(total_timesteps=step_count, callback=callbacks)
  
         model.save(path=f'models/rl_cnn_model_{step_count}_steps.zip')
+        # torch.onnx.export(model.policy.cpu(), torch.rand(1, 23, 32, 32), f"models/rl_cnn_model_{step_count}_steps.onnx",input_names=['input_1'])
         print(f"Done training model.  this: {step_count}(steps), total: {model.num_timesteps}(steps)")
     except:
         model.save(path=f'models/tmp_rl_cnn_model_{model.num_timesteps}_steps.zip')
+        # torch.onnx.export(model.policy.cpu(), torch.rand(1, 23, 32, 32), f"models/tmp_rl_cnn_model_{model.num_timesteps}_steps.onnx",input_names=['input_1'])
         print(f"There are something errors. Finish training model. total: {model.num_timesteps}(steps)")
         traceback.print_exc()
     

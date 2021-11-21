@@ -1,24 +1,24 @@
 basic:
   seed: 42
-  n_envs: 24
+  n_envs: 1
   step_count: 100000000 # 100M
-  pretrained_bc_path: ./models/bc_policy_stack1_1800
-  pretrained_path: ./models/rl_cnn_model_6000000_steps.zip
+  pretrained_bc_path: ./models/bc_policy_new_fe28_nn_v3
+  pretrained_path: None # ./models/rl_cnn_model_9600000_steps.zip
   debug: False
 
 resume:
-  is_resume: True
-  run_id: upbeat-vortex-784  # run id in wandb
-  resume_num_timesteps: 6000000
+  is_resume: False
+  run_id: new_fe_nn_v3  # upbeat-vortex-784  # run id in wandb
+  resume_num_timesteps: 0  # 9600000
 
 callbacks:  
   eval:
-    n_envs: 4
+    n_envs: 1
     params:
       best_model_save_path: './models/'
       log_path: './logs/'
-      eval_freq: 3  # when rollout start
-      n_eval_episodes: 4 # Run 4 games
+      eval_freq: 1  # when rollout start
+      n_eval_episodes: 1 # Run 4 games
       deterministic: True
       render: False
 
@@ -29,13 +29,15 @@ callbacks:
     verbose: 0
 
 model:
+    _n_obs_channel: 28
+    # features_dim: 128
     model_update_step_freq: 50000
-    n_stack: 1
+    n_stack: 4
     params:
       verbose: 0
       tensorboard_log: "./tensorboard/"
-      learning_rate: 0.0003
+      learning_rate: 0.00005
       gamma: 0.998
       gae_lambda: 0.95
       batch_size: 128
-      n_steps: 8192  # 1024 * 8
+      n_steps: 4096  # 8192  # 1024 * 8

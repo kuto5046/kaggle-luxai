@@ -8,14 +8,17 @@ from luxai2021.env.lux_env import LuxEnvironment
 from luxai2021.game.constants import LuxMatchConfigs_Default, LuxMatchConfigs_Replay
 from agent_policy import AgentPolicy
 import glob 
+import onnxruntime as ort
 from luxai2021.game.game import Game 
 
 models = glob.glob(f'./models/rl_cnn_model_*_steps.zip')
 pretrained_model = sorted(models, key=lambda x: int(x.split('_')[-2]), reverse=True)[0]
-# pretrained_model = './models/rl_cnn_model_4800000_steps.zip'
+# pretrained_model = './models/bc_policy_new_fe28_nn_v3.onnx'
 print(pretrained_model)
+# model = ort.InferenceSession(pretrained_model)
 model = PPO.load(pretrained_model)
-_agent = AgentPolicy(mode="inference", model=model, n_stack=1)
+_agent = AgentPolicy(mode="inference", model=model, _n_obs_channel=28, n_stack=4)
+_agent.model.policy = _agent.model.policy.to('cpu')
 
 game_state = None
 def get_game_state(observation):

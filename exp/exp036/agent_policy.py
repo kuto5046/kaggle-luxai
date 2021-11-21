@@ -175,6 +175,11 @@ class CustomMlpExtractor(nn.Module):
         """
         return self.policy_net(features), self.value_net(features)
 
+    def forward_actor(self, features):
+        return self.policy_net(features)
+
+    def forward_critic(self, features):
+        return self.value_net(features)
 
 class CustomActorCriticCnnPolicy(ActorCriticCnnPolicy):
     def _build_mlp_extractor(self) -> None:

@@ -1,18 +1,21 @@
 import sys
 import time
 from functools import partial  # pip install functools
-
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import numpy as np
+import random 
 from gym import spaces
 sys.path.append("../../LuxPythonEnvGym")
 from luxai2021.env.agent import Agent, AgentWithModel
 from luxai2021.game.actions import *
 from luxai2021.game.game_constants import GAME_CONSTANTS
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from stable_baselines3.common.policies import ActorCriticCnnPolicy, ActorCriticPolicy
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
-
+import gym 
+from scipy.special import softmax
 
 def smart_transfer_to_nearby(game, team, unit_id, unit, target_type_restriction=None, **kwarg):
     """
@@ -92,7 +95,6 @@ def smart_transfer_to_nearby(game, team, unit_id, unit, target_type_restriction=
     
     return TransferAction(team, unit_id, target_unit_id, resource_type, resource_amount)
 
-
 class BasicConv2d(nn.Module):
     def __init__(self, input_dim, output_dim, kernel_size, bn):
         super().__init__()
@@ -109,26 +111,84 @@ class BasicConv2d(nn.Module):
         return h
 
     
-class LuxNet(BaseFeaturesExtractor):
+class CustomFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim):
-        super(LuxNet, self).__init__(observation_space, features_dim)
+        super(CustomFeatureExtractor, self).__init__(observation_space, features_dim)
         layers, filters = 12, 32
         self.n_obs_channel = observation_space.shape[0]
         self.conv0 = BasicConv2d(self.n_obs_channel, filters, (3, 3), False)
         self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
-        self.head = nn.Linear(filters, features_dim, bias=False)
+        self.head = nn.Sequential(
+            nn.Linear(filters*2, features_dim, bias=False),
+            # nn.Linear(filters, features_dim, bias=False),
+            nn.ReLU()
+        )
 
     def forward(self, x):
         h = F.relu_(self.conv0(x))
         for block in self.blocks:
             h = F.relu_(h + block(h))
         h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # (filter)
-        output = self.head(h_head)  # filter -> features_dim
+        h_avg = h.view(h.size(0), h.size(1), -1).mean(-1)
+        output = self.head(torch.cat([h_head, h_avg], dim=1))  # filter -> features_dim
         return output
+
+class CustomMlpExtractor(nn.Module):
+    """
+    Custom network for policy and value function.
+    It receives as input the features extracted by the feature extractor.
+
+    :param feature_dim: dimension of the features extracted with the features_extractor (e.g. features from a CNN)
+    :param last_layer_dim_pi: (int) number of units for the last layer of the policy network
+    :param last_layer_dim_vf: (int) number of units for the last layer of the value network
+    """
+
+    def __init__(
+        self,
+        features_dim: int,
+        last_layer_dim_pi: int = 64,
+        last_layer_dim_vf: int = 64,
+    ):
+        super(CustomMlpExtractor, self).__init__()
+
+        # IMPORTANT:
+        # Save output dimensions, used to create the distributions
+        self.latent_dim_pi = last_layer_dim_pi
+        self.latent_dim_vf = last_layer_dim_vf
+
+        # Policy network
+        self.policy_net = nn.Sequential(
+            nn.Linear(features_dim, last_layer_dim_pi), 
+            nn.BatchNorm1d(last_layer_dim_pi),
+            nn.ReLU(),
+        )
+        # Value network
+        self.value_net = nn.Sequential(
+            nn.Linear(features_dim, last_layer_dim_vf),
+            nn.BatchNorm1d(last_layer_dim_vf),
+            nn.ReLU(),
+        )
+
+    def forward(self, features):
+        """
+        :return: (th.Tensor, th.Tensor) latent_policy, latent_value of the specified network.
+            If all layers are shared, then ``latent_policy == latent_value``
+        """
+        return self.policy_net(features), self.value_net(features)
+    
+    def forward_actor(self, features):
+        return self.policy_net(features)
+
+    def forward_critic(self, features):
+        return self.value_net(features)
+
+class CustomActorCriticCnnPolicy(ActorCriticCnnPolicy):
+    def _build_mlp_extractor(self) -> None:
+        self.mlp_extractor = CustomMlpExtractor(self.features_dim)
 
 
 class AgentPolicy(AgentWithModel):
-    def __init__(self, mode="train", model=None, n_stack=1) -> None:
+    def __init__(self, mode="train", model=None, _n_obs_channel=23, n_stack=1) -> None:
         """
         Arguments:
             mode: "train" or "inference", which controls if this agent is for training or not.
@@ -136,9 +196,6 @@ class AgentPolicy(AgentWithModel):
         """
         super().__init__(mode, model)
 
-        # Define action and observation space
-        # They must be gym.spaces objects
-        # Example when using discrete actions:
         self.actions_units = [
             partial(MoveAction, direction=Constants.DIRECTIONS.CENTER),  # This is the do-nothing action
             partial(MoveAction, direction=Constants.DIRECTIONS.NORTH),
@@ -150,20 +207,17 @@ class AgentPolicy(AgentWithModel):
             SpawnCityAction,
             # PillageAction,
         ]
-
-        # self.actions_cities = [
-        #     SpawnWorkerAction,
-        #     # SpawnCartAction,
-        #     ResearchAction,
-        # ]
-        # self.action_space = spaces.Discrete(max(len(self.actions_units), len(self.actions_cities)))
         self.action_space = spaces.Discrete(len(self.actions_units))
         self.n_stack = n_stack
-        self._n_obs_channel = 23  # base obs
+        self._n_obs_channel = _n_obs_channel  #  28  # base obs
         self.n_obs_channel = self._n_obs_channel + (8 * (self.n_stack-1))  # base obs + last obs
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float32)
-        
         self.object_nodes = {}
+        self.tta = TTA()
+
+    def onnx_predict(self, input):
+        policy, value = self.model.run(None, {"input.1": np.expand_dims(input.astype(np.float32), 0)})
+        return policy[0], value[0]
 
     def get_agent_type(self):
         """
@@ -202,18 +256,8 @@ class AgentPolicy(AgentWithModel):
                     x=x,
                     y=y
                 )
-            else:
-                action =  self.actions_units[action_code%len(self.actions_units)](
-                    game=game,
-                    unit_id=unit.id if unit else None,
-                    unit=unit,
-                    city_id=city_tile.city_id if city_tile else None,
-                    citytile=city_tile,
-                    team=team,
-                    x=x,
-                    y=y
-                )
-            return action
+                return action
+            return None 
         except Exception as e:
             # Not a valid action
             print(e)
@@ -244,29 +288,9 @@ class AgentPolicy(AgentWithModel):
         self.rewards = {}
         self.last_unit_obs = [np.zeros((8, 32, 32)) for i in range(self.n_stack-1)]
 
-    def process_turn(self, game, team):
-        """
-        Decides on a set of actions for the current turn. Not used in training, only inference. Generally
-        don't modify this part of the code.
-        Returns: Array of actions to perform.
-        """
-        start_time = time.time()
+    def process_city_turn(self, game, team):
         actions = []
-        new_turn = True
-        # Inference the model per-unit
-        # obs = np.zeros(self.observation_space.shape)
-        base_obs = self.get_base_observation(game, team, self.last_unit_obs)
-        units = game.state["teamStates"][team]["units"].values()
-        unit_count = len(units)
-        for unit in units:
-            if unit.can_act():
-                obs = self.get_observation(game, unit, None, unit.team, new_turn, base_obs)
-                action_code, _states = self.model.predict(obs, deterministic=True)
-                if action_code is not None:
-                    actions.append(
-                        self.action_code_to_action(action_code, game=game, unit=unit, city_tile=None, team=unit.team))
-                new_turn = False
-
+        unit_count = len(game.get_teams_units(team))
         # city
         city_tile_count = 0
         for city in game.cities.values():
@@ -289,19 +313,72 @@ class AgentPolicy(AgentWithModel):
                             actions.append(action)
                             unit_count += 1
                         # # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
-                        if game.state["teamStates"][team]["researchPoints"] < 200:
+                        elif game.state["teamStates"][team]["researchPoints"] < 200:
                             action = ResearchAction(team, x, y, None)
                             actions.append(action)
                             game.state["teamStates"][team]["researchPoints"] += 1
-                        new_turn = False
+
+        return actions 
+
+    def process_unit_turn(self, game, team, base_obs):
+        actions = []
+        units = game.get_teams_units(team)
+        for unit in units.values():
+            if unit.can_act():
+                obs = self.get_observation(game, unit, None, unit.team, False, base_obs)
                 
+                # print(tensor_obs.shape)
+                # policy = self.model.policy.get_distribution(tensor_obs)
+                # is_onnx = False
+                # obs1 = self.tta.vertical_flip(obs)
+                # obs2 = self.tta.horizontal_flip(obs)
+                # obs3 = self.tta.all_flip(obs)
+                # if is_onnx:
+                #     stack_obs = np.stack([obs, obs1, obs2, obs3], axis=0)
+                #     self.onnx_predict(stack_obs)
+                # else:
+                # tensor_obs = torch.from_numpy(np.stack([obs, obs1, obs2, obs3], axis=0))
+                # tensor_obs = torch.from_numpy(np.stack([obs, obs], axis=0))
+                # tensor_obs = torch.from_numpy(np.stack([obs, obs], axis=0))
+                # features = self.model.policy.extract_features(tensor_obs)
+                # latent_pi, latent_vi = self.model.policy.mlp_extractor(features)
+                # policy = self.model.policy.action_net(latent_pi)[0].detach().numpy()
+                action_code = self.model.predict(obs)[0]
+                action = self.action_code_to_action(action_code, game=game, unit=unit, city_tile=None, team=unit.team)
+                if action is not None:
+                    actions.append(action)
+                # policies[1] = self.tta.vertical_convert_action(policies[1]) 
+                # policies[2] = self.tta.horizontal_convert_action(policies[2]) 
+                # policies[3] = self.tta.all_convert_action(policies[3])
+                # policy = np.mean(policies, axis=0)
+                # for action_code in np.argsort(policy)[::-1]:
+                #     # 夜でcity上にいない場合はbuild cityはしない
+                #     # if (action_code == 6)&(game.is_night())&(not game.game_map_by_pos(unit.pos).is_city_tile):
+                #     #     continue 
+                #     action = self.action_code_to_action(action_code, game=game, unit=unit, city_tile=None, team=unit.team)
+                #     if action.is_valid(game, actions):
+                #         actions.append(action)
+                #         break      
+        return actions 
+
+    def process_turn(self, game, team):
+        """
+        Decides on a set of actions for the current turn. Not used in training, only inference. Generally
+        don't modify this part of the code.
+        Returns: Array of actions to perform.
+        """
+        start_time = time.time()
+        base_obs = self.get_base_observation(game, team, self.last_unit_obs)
+        unit_actions = self.process_unit_turn(game, team, base_obs)
+        city_actions = self.process_city_turn(game, team)
+        actions = unit_actions + city_actions
+
         if self.n_stack > 1:
             self.get_last_observation(base_obs)
         time_taken = time.time() - start_time
         if time_taken > 0.5:  # Warn if larger than 0.5 seconds.
             print("[RL Agent]WARNING: Inference took %.3f seconds for computing actions. Limit is 1 second." % time_taken,
                   file=sys.stderr)
-
         return actions
 
     def get_last_observation(self, obs):
@@ -312,6 +389,56 @@ class AgentPolicy(AgentWithModel):
             self.last_unit_obs.pop(0)
         assert len(self.last_unit_obs) == self.n_stack - 1
 
+    def prob_unit_destroy_next_turn(self, game, _unit):
+        """
+
+        """
+        # resource < 4 & is not on city tile & is not adjacent resource
+        current_cell = game.map.get_cell(_unit.pos.x, _unit.pos.y)
+        current_adjacent_cells = game.map.get_adjacent_cells(current_cell)
+        current_resource_count = np.sum([cell.resource is not None for cell in current_adjacent_cells]*1)
+        if (np.sum(list(_unit.cargo.values())) < 4)& \
+            (not current_cell.is_city_tile) & \
+            (current_resource_count == 0):
+
+            adjacent_city_tile_count = 0
+            for cell in current_adjacent_cells:
+                if cell.is_city_tile:
+                    adjacent_city_tile_count += 1
+
+            next_resource_count = 0
+            for d in ['c', 'n', 'w', 's', 'e']:
+                next_adjacent_cells = game.map.get_adjacent_cells(_unit.pos.translate(d, 1))
+                for cell in next_adjacent_cells:
+                    if cell.resource is not None:
+                        next_resource_count += 1
+
+            # 必ず消滅する
+            # 隣接cellにもcitytileがない&resourceに隣接していない場合
+            if (adjacent_city_tile_count == 0)|(next_resource_count == 0):
+                return 1
+            else:  # 消失する可能性がある
+                return 0.5
+        else:  # 消失しない
+            return 0
+
+    def get_convert_fuel_loss(self, _unit):
+        # convert loss from resource to fuel in night turn      
+        coal_loss = 0
+        uranium_loss = 0 
+        consume_resource_in_night = {'wood': 0,  'coal': 0, 'uranium': 0}
+        for r_name, amt in _unit.cargo.items():
+            for i in range(amt):
+                if np.sum(list(consume_resource_in_night.values())) < 4:
+                    consume_resource_in_night[r_name] += 1
+                else:
+                    break
+        # wood's fuel rate is 1, so wood_loss is always zero.
+        coal_loss = (GAME_CONSTANTS["PARAMETERS"]["RESOURCE_TO_FUEL_RATE"]["COAL"] - 1)*consume_resource_in_night["coal"]
+        uranium_loss = (GAME_CONSTANTS["PARAMETERS"]["RESOURCE_TO_FUEL_RATE"]["URANIUM"] - 1)*consume_resource_in_night["uranium"]
+        loss = coal_loss + uranium_loss
+        return loss 
+   
     def get_base_observation(self, game, team, last_unit_obs):
         """
         Implements getting a observation from the current game for this unit or city
@@ -335,6 +462,13 @@ class AgentPolicy(AgentWithModel):
             resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
             b[2:5, x,y] += (1, cooldown, resource)
 
+            # in night
+            if game.is_night():
+                loss = self.get_convert_fuel_loss(_unit)
+                b[23, x,y] = loss / 156  # max is 4*(40-1)=156
+        
+            b[26,x,y] = self.prob_unit_destroy_next_turn(game, _unit)
+
         for _unit in game.state["teamStates"][opponent_team]["units"].values():
             x = _unit.pos.x + x_shift
             y = _unit.pos.y + y_shift
@@ -342,8 +476,18 @@ class AgentPolicy(AgentWithModel):
             cap = GAME_CONSTANTS["PARAMETERS"]["RESOURCE_CAPACITY"]["CART"] 
             resource = (_unit.cargo["wood"] + _unit.cargo["coal"] + _unit.cargo["uranium"]) / cap
             b[5:8, x,y] += (1, cooldown, resource)
+            
+            b[27,x,y] = self.prob_unit_destroy_next_turn(game, _unit)
+
+        own_city_tile_count = 0
+        for city in game.cities.values():
+            for cell in city.city_cells:
+                if city.team == team:
+                    own_city_tile_count += 1
 
         # city tile
+        own_unit_count = len(game.state["teamStates"][team]["units"].values())
+        own_incremental_rp = 0
         for city in game.cities.values():
             fuel = city.fuel
             lightupkeep = city.get_light_upkeep()
@@ -355,8 +499,17 @@ class AgentPolicy(AgentWithModel):
                 cooldown = cell.city_tile.cooldown / max_cooldown
                 if city.team == team:
                     b[8:11, x, y] = (1, fuel_ratio, cooldown)
+                    # 現ターンのcity行動により増えるunit
+                    if own_unit_count < own_city_tile_count:
+                        b[24, x,y] = 1
+                        own_unit_count += 1    
+                    elif game.state["teamStates"][team]["researchPoints"] < 200:
+                        own_incremental_rp += 1
                 else:
                     b[11:14, x, y] = (1, fuel_ratio, cooldown)
+   
+        # 現ターンのcity行動により増えるrp
+        b[25, :] = min(game.state["teamStates"][team]["researchPoints"]+own_incremental_rp, 200) / 200
 
         # resource
         resource_dict = {'wood': 14, 'coal': 15, 'uranium': 16}
@@ -432,8 +585,8 @@ class AgentPolicy(AgentWithModel):
             # "rew/r_research_points_coal_flag": 0,
             # "rew/r_research_points_uranium_flag": 0,
             # "rew/r_fuel_collected": 0,
-            "rew/r_city_tiles_end": 0,
-            # "rew/r_game_win": 0
+            # "rew/r_city_tiles_end": 0,
+            "rew/r_game_win": 0
             }
             
         turn = game.state["turn"]
@@ -449,22 +602,22 @@ class AgentPolicy(AgentWithModel):
             return 0
 
         # Get some basic stats
-        unit_count = len(game.state["teamStates"][self.team]["units"])
-        city_count = 0
-        city_count_opponent = 0
-        city_tile_count = 0
-        city_tile_count_opponent = 0
-        for city in game.cities.values():
-            if city.team == self.team:
-                city_count += 1
-            else:
-                city_count_opponent += 1
+        # unit_count = len(game.state["teamStates"][self.team]["units"])
+        # city_count = 0
+        # city_count_opponent = 0
+        # city_tile_count = 0
+        # city_tile_count_opponent = 0
+        # for city in game.cities.values():
+        #     if city.team == self.team:
+        #         city_count += 1
+        #     else:
+        #         city_count_opponent += 1
 
-            for cell in city.city_cells:
-                if city.team == self.team:
-                    city_tile_count += 1
-                else:
-                    city_tile_count_opponent += 1
+        #     for cell in city.city_cells:
+        #         if city.team == self.team:
+        #             city_tile_count += 1
+        #         else:
+        #             city_tile_count_opponent += 1
                 
         # Give a reward for unit creation/death. 0.05 reward per unit.
         # self.rewards["rew/r_units"] = (unit_count - self.units_last) * 0.005
@@ -495,14 +648,14 @@ class AgentPolicy(AgentWithModel):
 
         # Give a reward of 1.0 per city tile alive at the end of the game
         if is_game_finished:
-            self.is_last_turn = True
-            clip = 10
-            self.rewards["rew/r_city_tiles_end"] += np.clip(city_tile_count - city_tile_count_opponent, -clip, clip)
+            # self.is_last_turn = True
+            # clip = 10
+            # self.rewards["rew/r_city_tiles_end"] += np.clip(city_tile_count - city_tile_count_opponent, -clip, clip)
             
-            # if game.get_winning_team() == self.team:
-            #     self.rewards["rew/r_game_win"] += 1 # Win
-            # else:
-            #     self.rewards["rew/r_game_win"] -= 1 # Loss
+            if game.get_winning_team() == self.team:
+                self.rewards["rew/r_game_win"] += 1 # Win
+            else:
+                self.rewards["rew/r_game_win"] -= 1 # Loss
 
         reward = 0
         for name, value in self.rewards.items():
@@ -519,32 +672,52 @@ class AgentPolicy(AgentWithModel):
             game ([type]): Game in progress
             is_first_turn (bool): True if it's the first turn of a game.
         """
-        unit_count = len(game.state["teamStates"][self.team]["units"].values())
-        # city
-        city_tile_count = 0
-        for city in game.cities.values():
-            for cell in city.city_cells:
-                if city.team == self.team:
-                    city_tile_count += 1
+        actions = self.process_city_turn(game, self.team)
+        self.match_controller.take_actions(actions)
 
-        cities = game.cities.values()
-        for city in cities:
-            if city.team == self.team:
-                for cell in city.city_cells:
-                    city_tile = cell.city_tile
-                    if city_tile.can_act():
-                        x = city_tile.pos.x
-                        y = city_tile.pos.y
-                        # obs = self.get_observation(game, None, city_tile, city.team, new_turn, base_obs)
-                        # action_code, _states = self.model.predict(obs, deterministic=False)
-                        # 保有unit数(worker)よりもcity tileの数が多いならworkerを追加
-                        if unit_count < city_tile_count:
-                            action = SpawnWorkerAction(self.team, None, x, y)
-                            self.match_controller.take_action(action)
-                            unit_count += 1
 
-                        # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
-                        elif game.state["teamStates"][self.team]["researchPoints"] < 200:
-                            action = ResearchAction(self.team, x, y, None)
-                            self.match_controller.take_action(action)
-                            game.state["teamStates"][self.team]["researchPoints"] += 1
+class TTA:            
+    def vertical_flip(self, state):
+        """
+        swap north(=0) and south(=2)
+        """
+        # flip up/down
+        state = state.transpose(2,1,0)  #(c,x,y) -> (y,x,c)
+        state = np.flipud(state).copy()
+        state = state.transpose(2,1,0)  # (w,h,c) -> (c,w,h)
+        return state
+
+    def horizontal_flip(self, state):
+        """
+        swap west(=1) and east(=3)
+        """
+        # flip left/right
+        state = state.transpose(2,1,0) #(x,y,c) -> (y,x,c)
+        state = np.fliplr(state).copy()
+        state = state.transpose(2,1,0)  # (w,h,c) -> (c,w,h)
+        return state
+    
+    def all_flip(self, state):
+        state = self.vertical_flip(state)
+        state = self.horizontal_flip(state)
+        return state
+
+    def random_roll(self, state):
+        n = random.randint(-5, 5)
+        m = random.randint(-5, 5)
+        return np.roll(state, (n,m), axis=(1,2))
+
+    def vertical_convert_action(self, action):
+        # order = [2,1,0,3,4]
+        order = [0,3,2,1,4,5,6]
+        return action[order]
+
+    def horizontal_convert_action(self, action):
+        # order = [0,3,2,1,4]
+        order = [0,1,4,3,2,5,6]
+        return action[order]
+    
+    def all_convert_action(self, action):
+        # order = [2,3,0,1,4]
+        order = [0,3,4,1,2,5,6]
+        return action[order]
