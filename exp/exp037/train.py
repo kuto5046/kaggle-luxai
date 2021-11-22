@@ -50,6 +50,7 @@ from luxai2021.env.lux_env import LuxEnvironment, SaveReplayAndModelCallback
 from luxai2021.game.constants import LuxMatchConfigs_Default
 from luxai2021.game.game import Game
 from stable_baselines3.common import base_class
+# from stable_baselines3.common.evaluation import evaluate_policy
 
 
 def evaluate_policy(
@@ -518,7 +519,7 @@ def main():
     else:
         # policy_kwargs = dict(
         #     features_extractor_class=LuxNet,
-        #     features_extractor_kwargs=dict(features_dim=features_dim),  # TODO net_archは不要？
+        #     features_extractor_kwargs=dict(features_dim=features_dim),  
         # )
         # Attach a ML model from stable_baselines3 and train a RL model
         class BCPolicy(CustomActorCriticCnnPolicy):
@@ -533,6 +534,7 @@ def main():
                 # policy.features_extractor.head = nn.Linear(32, 64, bias=False)
                 # for param in policy.features_extractor.head.parameters():
                 #     param.requires_grad = True
+                
                 return policy
 
         model = PPO(BCPolicy, env, **model_params)
@@ -547,12 +549,12 @@ def main():
     # Since reward metrics don't work for multi-environment setups, we add an evaluation logger
     # # for metrics.
     # An evaluation environment is needed to measure multi-env setups. Use a fixed 4 envs.
-    # env_eval = VecMonitor(SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
-    #                                                 learning_agent=AgentPolicy(mode="train", _n_obs_channel=_n_obs_channel, n_stack=n_stack),
-    #                                                 opponent_agents={"imitation": ImitationAgent()},
-    #                                                 # opponent_agents={"random": RandomAgent()},
-    #                                                 initial_opponent_policy="imitation"), i) for i in range(eval_n_envs)]))
-    # callbacks.append(CustomEvalCallback(env_eval, **eval_params))
+    env_eval = VecMonitor(SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
+                                                    learning_agent=AgentPolicy(mode="train", _n_obs_channel=_n_obs_channel, n_stack=n_stack),
+                                                    opponent_agents={"imitation": ImitationAgent()},
+                                                    # opponent_agents={"random": RandomAgent()},
+                                                    initial_opponent_policy="imitation"), i) for i in range(eval_n_envs)]))
+    callbacks.append(CustomEvalCallback(env_eval, **eval_params))
     
     ###########
     # train

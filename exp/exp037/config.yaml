@@ -1,6 +1,6 @@
 basic:
   seed: 42
-  n_envs: 1
+  n_envs: 24
   step_count: 100000000 # 100M
   pretrained_bc_path: ./models/bc_policy_new_fe28_nn_v3
   pretrained_path: None # ./models/rl_cnn_model_9600000_steps.zip
@@ -8,18 +8,18 @@ basic:
 
 resume:
   is_resume: False
-  run_id: new_fe_nn_v3  # upbeat-vortex-784  # run id in wandb
+  run_id: new_fe_nn_update_cliping_v3  # upbeat-vortex-784  # run id in wandb
   resume_num_timesteps: 0  # 9600000
 
 callbacks:  
   eval:
-    n_envs: 1
+    n_envs: 4
     params:
       best_model_save_path: './models/'
       log_path: './logs/'
-      eval_freq: 1  # when rollout start
-      n_eval_episodes: 1 # Run 4 games
-      deterministic: True
+      eval_freq: 5  # when rollout start
+      n_eval_episodes: 4 # Run 4 games
+      deterministic: False
       render: False
 
   checkpoints:
@@ -30,14 +30,16 @@ callbacks:
 
 model:
     _n_obs_channel: 28
-    # features_dim: 128
     model_update_step_freq: 50000
     n_stack: 4
     params:
       verbose: 0
       tensorboard_log: "./tensorboard/"
-      learning_rate: 0.00005
+      learning_rate: 0.00001
+      batch_size: 128
+      n_steps: 4096  # *24
       gamma: 0.998
       gae_lambda: 0.95
-      batch_size: 128
-      n_steps: 4096  # 8192  # 1024 * 8
+      ent_coef: 0.01
+      clip_range: 0.1
+      target_kl: 0.003  # 方策の更新を大きく行わないためにKL-targetを小さくする
