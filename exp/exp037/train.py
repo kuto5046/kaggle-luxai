@@ -516,6 +516,7 @@ def main():
         model = PPO.load(pretrained_path, device="cuda")
         model.set_env(env)
         model = load_model_params(model, model_params)
+        model._setup_model()
     else:
         # policy_kwargs = dict(
         #     features_extractor_class=LuxNet,

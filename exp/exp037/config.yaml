@@ -3,13 +3,13 @@ basic:
   n_envs: 24
   step_count: 100000000 # 100M
   pretrained_bc_path: ./models/bc_policy_new_fe28_nn_v3
-  pretrained_path: None # ./models/rl_cnn_model_9600000_steps.zip
+  pretrained_path: ./models/rl_cnn_model_8400000_steps.zip
   debug: False
 
 resume:
-  is_resume: False
+  is_resume: True
   run_id: new_fe_nn_update_cliping_v3  # upbeat-vortex-784  # run id in wandb
-  resume_num_timesteps: 0  # 9600000
+  resume_num_timesteps: 8400000
 
 callbacks:  
   eval:
