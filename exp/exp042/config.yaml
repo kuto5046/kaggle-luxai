@@ -1,0 +1,19 @@
+basic:
+  seed: 42
+  run_id: stack1_action6_v2 # faithful-thunder-392  # run id in wandb
+  debug: False
+  method: BC
+  batch_size: 64
+  n_stack: 1
+  features_dim: 128
+
+trajectory:
+  episode_dir: ../../input/lux_ai_toad1800_episodes_1108/
+  data_dir: ./tmp_data/
+  only_win: True
+
+BC:
+  trainer_params:
+    n_epochs: 10
+    log_interval: 5000
+    reset_tensorboard: True
