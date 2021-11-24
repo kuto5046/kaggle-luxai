@@ -1,0 +1,45 @@
+basic:
+  seed: 42
+  n_envs: 1
+  step_count: 100000000 # 100M
+  pretrained_bc_path: ./models/bc_policy_stack1_action6_v2
+  pretrained_path: ./models/rl_cnn_model_27600000_steps.zip
+  debug: True
+
+resume:
+  is_resume: True
+  run_id: rl_stack1_action6_v2  # upbeat-vortex-784  # run id in wandb
+  resume_num_timesteps: 27600000
+
+callbacks:  
+  eval:
+    n_envs: 1
+    params:
+      best_model_save_path: 'models/'
+      log_path: './logs/'
+      eval_freq: 5  # when rollout start
+      n_eval_episodes: 5 # Run 4 games
+      deterministic: False
+      render: False
+
+  checkpoints:
+    save_freq: 50000  # 1,200,000
+    save_path: 'models/'
+    name_prefix: rl_cnn_model
+    verbose: 0
+
+model:
+    _n_obs_channel: 28
+    model_update_step_freq: 50 # 000
+    n_stack: 1
+    params:
+      verbose: 0
+      tensorboard_log: "./tensorboard/"
+      learning_rate: 0.00001
+      batch_size: 128
+      n_steps: 8192 # 2048
+      gamma: 0.998
+      gae_lambda: 0.95
+      ent_coef: 0.01
+      clip_range: 0.1
+      target_kl: 0.003  # 方策の更新を大きく行わないためにKL-targetを小さくする
