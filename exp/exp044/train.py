@@ -19,12 +19,10 @@ from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-
-from agent_policy import LuxNet
 import sys
-sys.path.append("../../LuxPythonEnvGym/")
-from luxai2021.game.city import City, CityTile
+
+# sys.path.append("../../LuxPythonEnvGym/")
+# from luxai2021.game.city import City, CityTile
 
 def get_logger(level=INFO, out_file=None):
     logger = logging.getLogger()
@@ -78,10 +76,7 @@ def make_input(obs, unit_id, n_obs_channel):
     x_shift = (32 - width) // 2
     y_shift = (32 - height) // 2
     cities = {}
-    own_actionable_city_tiles = []
-    unit_count = 0
-    city_tile_count = 0
-    incremental_rp = 0
+    
     # (c, w, h)
     # mapの最大サイズが(32,32)なのでそれに合わせている
     b = np.zeros((n_obs_channel, 32, 32), dtype=np.float32)
@@ -96,8 +91,6 @@ def make_input(obs, unit_id, n_obs_channel):
             wood = int(strs[7])
             coal = int(strs[8])
             uranium = int(strs[9])
-            team = int(strs[2])
-            cooldown = float(strs[6])
             if unit_id == strs[3]:
                 # Position and Cargo
                 b[:2, x, y] = (
@@ -106,15 +99,14 @@ def make_input(obs, unit_id, n_obs_channel):
                 )
             else:
                 # Units
+                team = int(strs[2])
+                cooldown = float(strs[6])
                 idx = 2 + (team - obs['player']) % 2 * 3
                 b[idx:idx + 3, x, y] += (
                     1,
                     cooldown / 6,
                     (wood + coal + uranium) / 2000
-                )            
-            if team == obs["player"]:
-                unit_count += 1
-
+                )
         elif input_identifier == 'ct':
             # CityTiles
             team = int(strs[1])
@@ -122,10 +114,6 @@ def make_input(obs, unit_id, n_obs_channel):
             x = int(strs[3]) + x_shift
             y = int(strs[4]) + y_shift
             cooldown = int(strs[5])
-            if team == obs["player"]:
-                city_tile_count += 1
-                if cooldown==0:
-                    own_actionable_city_tiles.append((x,y, city_id))
             idx = 8 + (team - obs['player']) % 2 * 3
             b[idx:idx + 3, x, y] = (
                 1,
@@ -163,15 +151,6 @@ def make_input(obs, unit_id, n_obs_channel):
     # Map Size
     b[22, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
 
-    # 現ターンのcity行動により増えるunit
-    for (x,y,city_id) in own_actionable_city_tiles:
-        if unit_count < city_tile_count:
-            b[23, x,y] = 1
-            unit_count += 1    
-        elif rp < 200:
-            incremental_rp += 1
-    # 現ターンのcity行動により増えるrp
-    b[24,] = min(rp+incremental_rp, 200) / 200
     return b
 
 
@@ -226,99 +205,28 @@ def make_last_input(obs):
             lightupkeep = float(strs[4])
             cities[city_id] = min(fuel / lightupkeep, 10) / 10
     return b
- 
+
+# Neural Network for Lux AI
+class BasicConv2d(nn.Module):
+    def __init__(self, input_dim, output_dim, kernel_size, bn):
+        super().__init__()
+        self.conv = nn.Conv2d(
+            input_dim, output_dim, 
+            kernel_size=kernel_size, 
+            padding=(kernel_size[0] // 2, kernel_size[1] // 2)
+        )
+        self.bn = nn.BatchNorm2d(output_dim) if bn else None
+
+    def forward(self, x):
+        h = self.conv(x)
+        h = self.bn(h) if self.bn is not None else h
+        return h
+
 def depleted_resources(obs):
     for u in obs['updates']:
         if u.split(' ')[0] == 'r':
             return False
     return True
-
-
-def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', only_win=False, target_sub_id_list=[]): 
-    logger.info(f"Team: {team_name}")
-    labels = []
-    obs_ids = []
-    unit_ids = []
-
-    os.makedirs(data_dir, exist_ok=True)
-    non_actions_count = 0
-    episodes = [path for path in Path(episode_dir).glob('*.json') if 'output' not in path.name]
-
-    submission_id_list = []
-    latest_lb_list = []
-    for filepath in tqdm(episodes): 
-        with open(filepath) as f:
-            json_load = json.load(f)
-            submission_id_list.append(json_load['other']['SubmissionId'])            
-            latest_lb_list.append(json_load['other']['LatestLB'])            
-    sub_df = pd.DataFrame([submission_id_list, latest_lb_list], index=['SubmissionId', 'LatestLB']).T
-    # target_sub_id = sub_df["SubmissionId"].value_counts().index[0]
-    # target_sub_id_list.append(target_sub_id)
-    print(sub_df.groupby(['SubmissionId'])['LatestLB'].mean())
-    print(sub_df.groupby(['SubmissionId'])['LatestLB'].count())
-    print('target sub id:', target_sub_id_list)
-    for filepath in tqdm(episodes): 
-        with open(filepath) as f:
-            json_load = json.load(f)
-
-        if (len(target_sub_id_list)>0)&(json_load['other']['SubmissionId'] not in target_sub_id_list):
-            continue
-
-        ep_id = json_load['info']['EpisodeId']
-
-        # if os.path.exists(f"{data_dir}/{ep_id}_*.pickle"):
-        #     continue
-
-        win_index = np.argmax([r or 0 for r in json_load['rewards']])  # win or tie
-        if only_win:  # 指定したチームが勝ったepisodeのみ取得
-            if json_load['info']['TeamNames'][win_index] != team_name:
-                continue
-            own_index = win_index
-        else:  # 指定したチームの勝敗関わらずepisodeを取得
-            if team_name not in json_load['info']['TeamNames']: 
-                continue
-            own_index = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex
-
-        for i in range(len(json_load['steps'])-1):
-            if json_load['steps'][i][own_index]['status'] == 'ACTIVE':
-                # 現在のstep=iのobsを見て選択されたactionが正解データになるのでi+1のactionを取得する
-                actions = json_load['steps'][i+1][own_index]['action']
-
-                # 空のactionsもある actions=[]
-                # その場合skip
-                if actions == None:
-                    non_actions_count += 1
-                    continue
-                obs = json_load['steps'][i][0]['observation']
-                
-                if depleted_resources(obs):
-                    break
-                
-                obs['player'] = own_index
-                obs = dict([
-                    (k,v) for k,v in obs.items() 
-                    if k in ['step', 'updates', 'player', 'width', 'height']
-                ])
-
-                # episode_idとstep数からobs_idを振る
-                obs_id = f'{ep_id}_{i}'
-                with open(data_dir + f'{obs_id}.pickle', mode="wb") as f:
-                    pickle.dump(obs, f)
-                for action in actions:
-                    # moveとbuild cityのaction labelのみが取得される?
-                    label, unit_id = to_label(action)
-                    if label is not None:
-                        labels.append(label)
-                        obs_ids.append(obs_id)
-                        unit_ids.append(unit_id)
-
-    df = pd.DataFrame()
-    df['label'] = labels
-    df['obs_id'] = obs_ids
-    df['unit_id'] = unit_ids
-    df.to_csv(data_dir + 'data.csv', index=False)
-    logger.info(f"空のactionsの数: {non_actions_count}")
-    return df
 
 def vertical_flip(state, action):
     """
@@ -382,17 +290,109 @@ class LuxDataset(Dataset):
             state = np.concatenate([state, last_state], axis=0)
         assert state.shape[0] == self.n_obs_channel + 8*(self.n_stack-1)
 
-        # if self.phase == 'train':
-        #     if random.random() < 0.3:
-        #         state, action = horizontal_flip(state, action)
-        #     if random.random() < 0.3:
-        #         state, action = vertical_flip(state, action)  
+        if self.phase == 'train':
+            if random.random() < 0.3:
+                state, action = horizontal_flip(state, action)
+            if random.random() < 0.3:
+                state, action = vertical_flip(state, action)  
 
         return state, action
 
-def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, scheduler=None, num_epochs=2):
-    best_acc = 0.0
+    
+class LuxNet(nn.Module):
+    def __init__(self, observation_space, features_dim):
+        super().__init__()
+        layers, filters = 12, 32
+        self.n_obs_channel = observation_space.shape[0]
+        self.conv0 = BasicConv2d(self.n_obs_channel, filters, (3, 3), False)
+        self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
+        self.head_p = nn.Linear(filters, features_dim, bias=False)
+       
+    def forward(self, x):
+        h = F.relu_(self.conv0(x))
+        for block in self.blocks:
+            h = F.relu_(h + block(h))
+        h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # h=head: (64, 32)
+        p = self.head_p(h_head)  # policy
+        return p  
 
+
+def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', only_win=False): 
+    logger.info(f"Team: {team_name}")
+    labels = []
+    obs_ids = []
+    unit_ids = []
+    sub_ids = []
+    ep_ids = []
+    lb_scores = []
+    os.makedirs(data_dir, exist_ok=True)
+    episodes = [path for path in Path(episode_dir).glob('*.json') if 'output' not in path.name]
+    for filepath in tqdm(episodes): 
+        with open(filepath) as f:
+            json_load = json.load(f)
+#         if json_load['other']['SubmissionId'] not in target_sub_id_list:
+#             continue
+        sub_id = json_load['other']['SubmissionId']
+        lb_score = json_load['other']['LatestLB']
+        ep_id = json_load['info']['EpisodeId']
+        win_index = np.argmax([r or 0 for r in json_load['rewards']])  # win or tie
+        if only_win:  # 指定したチームが勝ったepisodeのみ取得
+            if json_load['info']['TeamNames'][win_index] != team_name:
+                continue
+            own_index = win_index
+        else:  # 指定したチームの勝敗関わらずepisodeを取得
+            if team_name not in json_load['info']['TeamNames']: 
+                continue
+            own_index = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex
+
+        for i in range(len(json_load['steps'])-1):
+            if json_load['steps'][i][own_index]['status'] == 'ACTIVE':
+                # 現在のstep=iのobsを見て選択されたactionが正解データになるのでi+1のactionを取得する
+                actions = json_load['steps'][i+1][own_index]['action']
+
+                # 空のactionsもある actions=[]
+                # その場合skip
+                if actions == None:
+                    continue
+                obs = json_load['steps'][i][0]['observation']
+                
+                if depleted_resources(obs):
+                    break
+                
+                obs['player'] = own_index
+                obs = dict([
+                    (k,v) for k,v in obs.items() 
+                    if k in ['step', 'updates', 'player', 'width', 'height']
+                ])
+
+                # episode_idとstep数からobs_idを振る
+                obs_id = f'{ep_id}_{i}'
+                with open(data_dir + f'{obs_id}.pickle', mode="wb") as f:
+                    pickle.dump(obs, f)
+                for action in actions:
+                    # moveとbuild cityのaction labelのみが取得される?
+                    label, unit_id = to_label(action)
+            
+                    if label is not None:
+                        labels.append(label)
+                        obs_ids.append(obs_id)
+                        unit_ids.append(unit_id)
+                        sub_ids.append(sub_id)
+                        ep_ids.append(ep_id)
+                        lb_scores.append(lb_score)
+
+    df = pd.DataFrame()
+    df['ep_id'] = ep_ids
+    df['sub_id'] = sub_ids
+    df['lb_score'] = lb_scores
+    df['label'] = labels
+    df['obs_id'] = obs_ids
+    df['unit_id'] = unit_ids
+    df.to_csv(data_dir + 'data.csv', index=False)
+    return df
+
+def train_model(model, dataloaders_dict, p_criterion,optimizer, n_obs_channel, scheduler=None, num_epochs=2):
+    best_acc = 0.0
     for epoch in range(num_epochs):
         model.cuda()
         
@@ -403,10 +403,10 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
                 model.eval()
                 
             epoch_ploss = 0.0
-            epoch_vloss = 0.0
             epoch_acc = 0
             dataloader = dataloaders_dict[phase]
-            for item in tqdm(dataloader, leave=False):
+            for item in tqdm(dataloader, leave=False):        
+                
                 states = item[0].cuda().float()
                 actions = item[1].cuda().long()
 
@@ -416,8 +416,7 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
                     # policy, value = model(states)
                     policy = model(states)
                     policy_loss = p_criterion(policy, actions)
-                    # value_loss = v_criterion(value, rewards)
-                    loss = policy_loss  #  + value_loss
+                    loss = policy_loss
                     _, preds = torch.max(policy, 1)
 
                     if phase == 'train':
@@ -426,14 +425,12 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
 
                     batch_size = len(policy)
                     epoch_ploss += policy_loss.item() * batch_size
-                    # epoch_vloss += value_loss.item() * batch_size
                     num_correct = (preds.cpu() == actions.data.cpu())
                     epoch_acc += torch.sum(num_correct)
 
 
             data_size = len(dataloader.dataset)
             epoch_ploss = epoch_ploss / data_size
-            # epoch_vloss = epoch_vloss / data_size
             epoch_acc = epoch_acc.double() / data_size
             if phase == 'train':
                 wandb.log({'Loss/train': epoch_ploss, 'ACC/train': epoch_acc})
@@ -443,27 +440,40 @@ def train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_
                 logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Acc: {epoch_acc:.4f}')
         
         if epoch_acc > best_acc:
-            traced = torch.jit.trace(model.cpu(), torch.rand(1, n_obs_channel, 32, 32))
-            traced.save('jit_best.pth')
-            torch.save(model.cpu().state_dict(), 'best.pth')
-            dummy_input = states[0].unsqueeze(0).cpu()
-            torch.onnx.export(model.cpu(), dummy_input, f"best.onnx",input_names=['input_1'])
+            # traced = torch.jit.trace(model.cpu(), torch.rand(1, n_obs_channel, 32, 32))
+            # traced.save('jit_best.pth')
+            # torch.save(model.cpu().state_dict(), 'best.pth')
+            dummy_input = torch.rand(1, n_obs_channel, 32, 32) 
+            torch.onnx.export(model.cpu(), dummy_input, "best.onnx")
             best_acc = epoch_acc
 
         if scheduler is not None:
             scheduler.step()
-     
+
+
 def main():
     seed = 42
     seed_everything(seed)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
-    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME) 
-    team_name = "Love Deluxe"   # "Toad Brigade"
-    episode_dir = '../../input/lux_ai_love1700_episodes_1117/'
-    # episode_dir = '../../input/lux_ai_toad1800_episodes_1108/'
+    team_names = ['Toad Brigade', 'RL is all you need', 'ironbar', 'A.Saito', 'Team Durrett']
+    target_team_name = team_names[0]
+    run_id = f"local_{target_team_name}_v2"
+    print("target team:", target_team_name) 
+
+    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME, id=run_id)
+    episode_dir = '../../input/lux_ai_top_team_episodes_1124/'
     data_dir = "./tmp_data/"
-    target_sub_id_list = [23243815]  #, 23303548, 23381067, 23469931, 23582519]  # [23281649, 23297953]  # 23032370
-    df = create_dataset_from_json(episode_dir, data_dir, team_name=team_name, only_win=True, target_sub_id_list=target_sub_id_list)
+    target_sub_ids_dict = {
+        'Toad Brigade': [23032370], # [23281649, 23297953, 23032370],  # or 23032370
+        'RL is all you need':[23770016, 23770123, 23769678], 
+        'ironbar':[23642602, 23674317, 23674326],
+        'A.Saito':[23760238, 23542431], 
+        'Team Durrett': [23608696, 23889524] 
+    }
+    target_sub_ids = target_sub_ids_dict[target_team_name]
+
+    df = create_dataset_from_json(episode_dir, data_dir, team_name=target_team_name, only_win=True)
+    df = df[df['sub_id'].isin(target_sub_ids)]
     logger.info(f"obses:{df['obs_id'].nunique()} samples:{len(df)}")
     n_stack = 1
 
@@ -471,7 +481,7 @@ def main():
     actions = ['north', 'west', 'south', 'east', 'bcity']
     for value, count in zip(*np.unique(labels, return_counts=True)):
         logger.info(f'{actions[value]:^5}: {count:>3}')
-    _n_obs_channel = 25
+    _n_obs_channel = 23
     n_obs_channel = _n_obs_channel + 8*(n_stack-1)
     observation_space = spaces.Box(low=0, high=1, shape=(n_obs_channel, 32, 32), dtype=np.float16)
     model = LuxNet(observation_space=observation_space, features_dim=len(actions))
@@ -492,11 +502,10 @@ def main():
     )
     dataloaders_dict = {"train": train_loader, "val": val_loader}
     p_criterion = nn.CrossEntropyLoss()
-    v_criterion = nn.MSELoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     # scheduler = CosineAnnealingLR(optimizer, T_max=10)
 
-    train_model(model, dataloaders_dict, p_criterion, v_criterion, optimizer, n_obs_channel, num_epochs=10)
+    train_model(model, dataloaders_dict, p_criterion, optimizer, n_obs_channel, num_epochs=10)
     wandb.finish()
     shutil.rmtree(data_dir)
 
