@@ -18,3 +18,11 @@ agents/*/__pycache__/
 exp/*/results.log
 agents/rulebased
 exp/*/trajectory/
+sub_test*
+*.pickle
+*.npy
+exp/*/onnxruntime
+exp/*/stable_baselines3
+exp/*/*.pth
+exp/*/*.tar.gz
+exp/*/*.onnx

@@ -24,7 +24,7 @@ sh submission.sh <AGENT_PATH>
 
 ### Submit file to kaggle
 ```sh
-kaggle competitions submit -c lux-ai-2021 -f submission.py -m "Message"
+kaggle competitions submit -c lux-ai-2021 -f submission.tar.gz -m "Message"
 ```
 
 ### Replay the game

@@ -7,7 +7,7 @@ matplotlib==3.3.3
 scipy==1.6.0
 ipdb==0.13.4
 matplotlib-venn==0.11.6
-
+jupyterlab
 # 画像
 opencv-python==4.4.0.40
 
@@ -34,6 +34,7 @@ lightgbm==3.1.1
 kaggle-environments==1.8.12
 stable-baselines3==0.8.0
 imitation==0.2.0
+onnxruntime==1.9.0
 
 # other
 pathlib==1.0.1
