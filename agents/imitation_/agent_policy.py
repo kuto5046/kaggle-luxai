@@ -151,7 +151,7 @@ class ImitationAgent_(Agent):
         ]
         self.n_obs_channel = 23
         observation_space = spaces.Box(low=0, high=1, shape=(self.n_obs_channel, 32, 32), dtype=np.float16)
-        self.model_path = "/work/agents/imitation/models/toad1800_1115.onnx"
+        self.model_path = "/work/agents/imitation_/models/toad1800_1115.onnx"
         self.model = None 
         # self.model = LuxNet(observation_space, features_dim=len(self.actions_units))
         # self.set_model()

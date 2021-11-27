@@ -15,6 +15,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import gym 
+import glob
+import onnxruntime as ort 
 from stable_baselines3 import PPO  # pip install stable-baselines3
 
 def smart_transfer_to_nearby(game, team, unit_id, unit, target_type_restriction=None, **kwarg):
@@ -216,9 +218,14 @@ class AgentPolicy(AgentWithModel):
         self.model = model
         self.tta = TTA()
 
-    # def onnx_predict(self, input):
-    #     policy, value = self.model.run(None, {"input.1": np.expand_dims(input.astype(np.float32), 0)})
-    #     return policy[0], value[0]
+    def set_model(self, model_path):
+        self.model = ort.InferenceSession(model_path)
+        print(f"[Self-Play Agent] set model by {model_path}")
+
+
+    def onnx_predict(self, input):
+        policy, value = self.model.run(None, {"input.1": np.expand_dims(input.astype(np.float32), 0)})
+        return policy[0], value[0]
 
     def get_agent_type(self):
         """
@@ -229,8 +236,6 @@ class AgentPolicy(AgentWithModel):
         else:
             return Constants.AGENT_TYPE.AGENT
 
-    def update_model(self, model_path):
-        self.model = PPO.load(model_path, device='cpu')
         
     def action_code_to_action(self, action_code, game, unit=None, city_tile=None, team=None):
         """
@@ -332,9 +337,9 @@ class AgentPolicy(AgentWithModel):
             if unit.can_act():
                 obs = self.get_observation(game, unit, None, unit.team, False, base_obs)
                 # obs = torch.tensor(obs).unsqueeze(0)
-                features = self.model.policy.extract_features(obs)
-                latent_pi, latent_vi = self.model.policy.mlp_extractor(features)
-                policy = self.model.policy.action_net(latent_pi)
+                # features = self.model.policy.extract_features(obs)
+                # latent_pi, latent_vi = self.model.policy.mlp_extractor(features)
+                # policy = self.model.policy.action_net(latent_pi)
                 # # TODO かならずTTAかけるならbatchで処理した方が良い
 
                 # policy1, value1 = self.onnx_predict(obs)
@@ -700,15 +705,15 @@ class TTA:
 
     def vertical_convert_action(self, action):
         # order = [2,1,0,3,4]
-        order = [0,3,2,1,4,5,6]
+        order = [0,3,2,1,4,5]
         return action[order]
 
     def horizontal_convert_action(self, action):
         # order = [0,3,2,1,4]
-        order = [0,1,4,3,2,5,6]
+        order = [0,1,4,3,2,5]
         return action[order]
     
     def all_convert_action(self, action):
         # order = [2,3,0,1,4]
-        order = [0,3,4,1,2,5,6]
+        order = [0,3,4,1,2,5]
         return action[order]

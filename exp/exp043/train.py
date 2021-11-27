@@ -40,6 +40,7 @@ from agent_policy import AgentPolicy, CustomActorCriticCnnPolicy
 sys.path.append("../../")
 from agents.imitation.agent_policy import ImitationAgent
 from agents.random.agent_policy import RandomAgent
+from agents.imitation_.agent_policy import ImitationAgent_
 
 sys.path.append("../../LuxPythonEnvGym")
 import warnings
@@ -50,9 +51,9 @@ from luxai2021.env.lux_env import LuxEnvironment, SaveReplayAndModelCallback
 from luxai2021.game.constants import LuxMatchConfigs_Default
 from luxai2021.game.game import Game
 from stable_baselines3.common import base_class
-# from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.common.evaluation import evaluate_policy
 
-
+'''
 def evaluate_policy(
     model: "base_class.BaseAlgorithm",
     env: Union[gym.Env, VecEnv],
@@ -196,7 +197,7 @@ def evaluate_policy(
     if return_episode_rewards:
         return episode_rewards, episode_lengths, episode_rewards_dict
     return mean_reward, std_reward
-
+'''
 
 class CustomEvalCallback(EventCallback):
     """
@@ -309,7 +310,7 @@ class CustomEvalCallback(EventCallback):
 
             # Reset success rate buffer
             self._is_success_buffer = []
-            episode_rewards, episode_lengths, episode_rewards_dict = evaluate_policy(
+            episode_rewards, episode_lengths = evaluate_policy(
                 self.model,
                 self.eval_env,
                 n_eval_episodes=self.n_eval_episodes,
@@ -341,8 +342,8 @@ class CustomEvalCallback(EventCallback):
 
             mean_reward, std_reward = np.mean(episode_rewards), np.std(episode_rewards)
             mean_ep_length, std_ep_length = np.mean(episode_lengths), np.std(episode_lengths)
-            for k, v in episode_rewards_dict.items():
-                self.logger.record(k, np.mean(v))
+            # for k, v in episode_rewards_dict.items():
+            #     self.logger.record(k, np.mean(v))
 
             self.last_mean_reward = mean_reward
 
@@ -386,7 +387,40 @@ class CustomEvalCallback(EventCallback):
         if self.callback:
             self.callback.update_locals(locals_)
 
-    
+
+class OnnxablePolicy(torch.nn.Module):
+    def __init__(self, feature_extractor, mlp_extractor, action_net, value_net):
+        super(OnnxablePolicy, self).__init__()
+        self.feature_extractor = feature_extractor
+        self.mlp_extractor = mlp_extractor
+        self.action_net = action_net
+        self.value_net = value_net
+
+    def forward(self, observation):
+        features = self.feature_extractor(observation)
+        action_hidden, value_hidden = self.mlp_extractor(features)
+        return self.action_net(action_hidden), self.value_net(value_hidden)
+ 
+class CustomCheckpointCallback(CheckpointCallback):
+    def _on_step(self) -> bool:
+        if self.n_calls % self.save_freq == 0:
+            path = os.path.join(self.save_path, f"{self.name_prefix}_{self.num_timesteps}_steps")
+            self.model.save(path)
+            onnxable_model = OnnxablePolicy(
+                self.model.policy.features_extractor, 
+                self.model.policy.mlp_extractor, 
+                self.model.policy.action_net,
+                self.model.policy.value_net
+            )
+            n_obs_channel = 28
+            dummy_input = torch.randn(1, n_obs_channel, 32, 32)
+            copy_model = copy.deepcopy(onnxable_model)  # cpuで保存すると元のmodelもcpuになってしまうのでdeepcopyする
+            torch.onnx.export(copy_model.cpu(), dummy_input, f"{path}.onnx", opset_version=9)
+
+            if self.verbose > 1:
+                print(f"Saving model checkpoint to {path}")
+        return True
+
 
 def get_logger(level=INFO, out_file=None):
     logger = logging.getLogger("Log")
@@ -504,9 +538,8 @@ def main():
     # Create a default opponent agent and a RL agent in training mode
     env = VecMonitor(SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
                                                     learning_agent=AgentPolicy(mode="train", _n_obs_channel=_n_obs_channel, n_stack=n_stack),
-                                                    # opponent_agents={"imitation": ImitationAgent(id=i)},
                                                     opponent_agents={
-                                                        "imitation": ImitationAgent(),
+                                                        "imitation": ImitationAgent(model_path='/work/agents/imitation/models/'),
                                                         "self-play": AgentPolicy(mode="inference", _n_obs_channel=_n_obs_channel, n_stack=n_stack)
                                                         },
                                                     initial_opponent_policy="imitation",
@@ -547,14 +580,14 @@ def main():
     #############
     callbacks = []
     callbacks.append(WandbCallback())
-    callbacks.append(CheckpointCallback(**ckpt_params))
+    callbacks.append(CustomCheckpointCallback(**ckpt_params))
     
     # Since reward metrics don't work for multi-environment setups, we add an evaluation logger
     # # for metrics.
     # An evaluation environment is needed to measure multi-env setups. Use a fixed 4 envs.
     env_eval = VecMonitor(SubprocVecEnv([make_env(LuxEnvironment(configs=configs,
                                                     learning_agent=AgentPolicy(mode="train", _n_obs_channel=_n_obs_channel, n_stack=n_stack),
-                                                    opponent_agents={"imitation": ImitationAgent()},
+                                                    opponent_agents={"imitation": ImitationAgent_()},
                                                     # opponent_agents={"random": RandomAgent()},
                                                     initial_opponent_policy="imitation"), i) for i in range(eval_n_envs)]))
     callbacks.append(CustomEvalCallback(env_eval, **eval_params))
