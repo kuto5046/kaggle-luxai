@@ -522,7 +522,7 @@ def main():
     print("target team:", target_team_name)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
     run_id = f'UNet_IL_{target_team_name}_v1'
-    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME, id=run_id) 
+    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME, id=run_id, mode='disabled') 
 
     episode_dir = "../../input/lux_ai_top_team_episodes_1124/"
     data_dir = "./tmp_data/"
@@ -571,7 +571,7 @@ def main():
     model = LuxUNet(n_channels=17, n_classes=3)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
-    train_model(model, dataloaders_dict, p_criterion, optimizer, num_epochs=20)
+    train_model(model, dataloaders_dict, p_criterion, optimizer, num_epochs=10)
     wandb.finish()
 
 if __name__ == '__main__':
