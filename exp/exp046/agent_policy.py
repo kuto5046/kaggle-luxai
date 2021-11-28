@@ -102,12 +102,19 @@ class ImitationAgent(Agent):
                         x = city_tile.pos.x
                         y = city_tile.pos.y
                         # 保有unit数(worker)よりもcity tileの数が多いならworkerを追加
-                        if unit_count < city_tile_count:
+                        # 夜ならunitは作らない
+                        # rpの更新直前はrpを優先する
+                        if (unit_count < city_tile_count)& \
+                           (not game.is_night())& \
+                           (not 45<=game.state["teamStates"][team]["researchPoints"]<50) & \
+                           (not 190<=game.state["teamStates"][team]["researchPoints"]<200):
                             action = SpawnWorkerAction(team, None, x, y)
                             actions.append(action)
                             unit_count += 1
                         # # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
-                        elif game.state["teamStates"][team]["researchPoints"] < 200:
+                        # unitが少ない場合(<3)はcooldownを温存して次のturn以降でworker buildをしたい
+                        elif (game.state["teamStates"][team]["researchPoints"] < 200)& \
+                             (unit_count > 3):
                             action = ResearchAction(team, x, y, None)
                             actions.append(action)
                             game.state["teamStates"][team]["researchPoints"] += 1
@@ -119,16 +126,17 @@ class ImitationAgent(Agent):
         x_shift = (32 - game.map.width) // 2
         y_shift = (32 - game.map.height) // 2
         obs, global_obs = self.get_observation(game, team)
-        # policy_map = self.torch_predict(obs, global_obs)
-        policy_map1 = self.torch_predict(obs, global_obs)
-        policy_map2 = self.tta.horizontal_flip(self.tta.horizontal_convert_action(self.torch_predict(self.tta.horizontal_flip(obs), global_obs)))
-        policy_map3 = self.tta.vertical_flip(self.tta.vertical_convert_action(self.torch_predict(self.tta.vertical_flip(obs), global_obs)))
-        policy_map4 = self.tta.all_flip(self.tta.all_convert_action(self.torch_predict(self.tta.all_flip(obs), global_obs)))
-        policy_map5 = self.tta.reverse_random_roll(self.torch_predict(self.tta.random_roll(obs), global_obs))
-        policy_map6 = self.tta.reverse_random_roll(self.torch_predict(self.tta.random_roll(obs), global_obs))
-        policy_map7 = self.tta.reverse_random_roll(self.torch_predict(self.tta.random_roll(obs), global_obs))
-        policy_map8 = self.tta.reverse_random_roll(self.torch_predict(self.tta.random_roll(obs), global_obs))
-        policy_map = np.mean([policy_map1, policy_map2, policy_map3, policy_map4, policy_map5, policy_map6, policy_map7, policy_map8], axis=0)
+        policy_map = self.torch_predict(obs, global_obs)
+        # policy_map1 = self.torch_predict(obs, global_obs)
+        # policy_map2 = self.tta.horizontal_flip(self.tta.horizontal_convert_action(self.torch_predict(self.tta.horizontal_flip(obs), global_obs)))
+        # policy_map3 = self.tta.vertical_flip(self.tta.vertical_convert_action(self.torch_predict(self.tta.vertical_flip(obs), global_obs)))
+        # policy_map4 = self.tta.all_flip(self.tta.all_convert_action(self.torch_predict(self.tta.all_flip(obs), global_obs)))
+        # policy_map5 = self.tta.reverse_random_roll(self.torch_predict(self.tta.random_roll(obs), global_obs))
+        # policy_map6 = self.tta.reverse_random_roll(self.torch_predict(self.tta.random_roll(obs), global_obs))
+        # policy_map7 = self.tta.reverse_random_roll(self.torch_predict(self.tta.random_roll(obs), global_obs))
+        # policy_map8 = self.tta.reverse_random_roll(self.torch_predict(self.tta.random_roll(obs), global_obs))
+        # policy_map = np.mean([policy_map1, policy_map2, policy_map3, policy_map4, policy_map5, policy_map6, policy_map7, policy_map8], axis=0)
+        # policy_map = np.mean([policy_map1, policy_map5, policy_map6, policy_map7, policy_map8], axis=0)
         units = game.get_teams_units(team)
         for unit in units.values():
             if unit.can_act():
