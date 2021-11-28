@@ -21,14 +21,14 @@ callbacks:
       render: False
 
   checkpoints:
-    save_freq: 50000  # 1,200,000
+    save_freq: 100000  # 1,200,000
     save_path: 'models/'
     name_prefix: rl_cnn_model
     verbose: 0
 
 model:
     _n_obs_channel: 28
-    model_update_step_freq: 50000
+    model_update_step_freq: 100000
     n_stack: 1
     params:
       verbose: 0
