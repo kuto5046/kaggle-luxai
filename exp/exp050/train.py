@@ -19,7 +19,6 @@ import torch.optim as optim
 from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import sys
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 # sys.path.append("../../LuxPythonEnvGym/")
 # from luxai2021.game.city import City, CityTile
@@ -94,7 +93,8 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
     for filepath in tqdm(episodes): 
         with open(filepath) as f:
             json_load = json.load(f)
-
+#         if json_load['other']['SubmissionId'] not in target_sub_id_list:
+#             continue
         sub_id = json_load['other']['SubmissionId']
         lb_score = json_load['other']['LatestLB']
         ep_id = json_load['info']['EpisodeId']
@@ -128,6 +128,8 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
                     if k in ['step', 'updates', 'player', 'width', 'height']
                 ])
 
+
+                
                 unit_actions, actioned_unit_ids = extract_unit_actions(actions)
                 center_actions = extract_center_actions(obs, actioned_unit_ids)
                 unit_actions += center_actions
@@ -147,7 +149,7 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
 
 
                 with open(data_dir + f'{obs_id}.pickle', mode="wb") as f:
-                    pickle.dump(obs, f)
+                    pickle.dump((obs, sampling_actions), f)
 
     df = pd.DataFrame()
     df['ep_id'] = ep_ids
@@ -180,7 +182,23 @@ def to_label(action):
 
 
 # Input for Neural Network
-def make_input(obs, unit_id, n_obs_channel):
+def make_input(obs, acts, target_unit_id):
+    """
+    obs(23-4)=19
+    
+    global features(10)
+    own research point
+    opponent research point
+    cycle
+    turn
+    own unit count
+    opponent unit count
+    own city count
+    opponent city count
+    # own fuel
+    # opponent fuel
+    """
+    own_actionable_units = {}
     width, height = obs['width'], obs['height']
 
     # mapのサイズを調整するためにshiftするマス数
@@ -188,14 +206,15 @@ def make_input(obs, unit_id, n_obs_channel):
     x_shift = (32 - width) // 2
     y_shift = (32 - height) // 2
     cities = {}
-    own_actionable_city_tiles = []
-    unit_count = 0
-    city_tile_count = 0
-    incremental_rp = 0
-    # (c, w, h)
-    # mapの最大サイズが(32,32)なのでそれに合わせている
-    b = np.zeros((n_obs_channel, 32, 32), dtype=np.float32)
     
+    # (c, w, h)
+    own_unit_counts = 0
+    opponent_unit_counts = 0
+    own_citytile_counts = 0
+    opponent_citytile_counts = 0
+    # mapの最大サイズが(32,32)なのでそれに合わせている
+    b = np.zeros((17, 32, 32), dtype=np.float32)
+    global_b = np.zeros((8, 4, 4), dtype=np.float32)
     for update in obs['updates']:
         strs = update.split(' ')
         input_identifier = strs[0]
@@ -203,28 +222,28 @@ def make_input(obs, unit_id, n_obs_channel):
         if input_identifier == 'u':
             x = int(strs[4]) + x_shift
             y = int(strs[5]) + y_shift
+            unit_id = strs[3]
             wood = int(strs[7])
             coal = int(strs[8])
             uranium = int(strs[9])
+            
+            # Units
             team = int(strs[2])
             cooldown = float(strs[6])
-            if unit_id == strs[3]:
-                # Position and Cargo
-                b[:2, x, y] = (
-                    1,
-                    (wood + coal + uranium) / 2000
-                )
+            idx = 0 + (team - obs['player']) % 2 * 3
+            b[idx:idx + 3, x, y] += (
+                1,
+                cooldown / 6,
+                (wood + coal + uranium) / 2000
+            )
+            if team == obs['player']:
+                own_unit_counts += 1
             else:
-                # Units
-                idx = 2 + (team - obs['player']) % 2 * 3
-                b[idx:idx + 3, x, y] += (
-                    1,
-                    cooldown / 6,
-                    (wood + coal + uranium) / 2000
-                )            
-            if team == obs["player"]:
-                unit_count += 1
-
+                opponent_unit_counts += 1
+            
+            # if (obs['player'] == team)&(cooldown == 0):
+            own_actionable_units[unit_id] = (x,y)
+        
         elif input_identifier == 'ct':
             # CityTiles
             team = int(strs[1])
@@ -232,28 +251,29 @@ def make_input(obs, unit_id, n_obs_channel):
             x = int(strs[3]) + x_shift
             y = int(strs[4]) + y_shift
             cooldown = int(strs[5])
-            if team == obs["player"]:
-                city_tile_count += 1
-                if cooldown==0:
-                    own_actionable_city_tiles.append((x,y, city_id))
-            idx = 8 + (team - obs['player']) % 2 * 3
+            idx = 6 + (team - obs['player']) % 2 * 3
             b[idx:idx + 3, x, y] = (
                 1,
                 cities[city_id],
                 cooldown / 10
             )
+            if team == obs['player']:
+                own_citytile_counts += 1
+            else:
+                opponent_citytile_counts += 1
+            
         elif input_identifier == 'r':
             # Resources
             r_type = strs[1]
             x = int(strs[2]) + x_shift
             y = int(strs[3]) + y_shift
             amt = int(float(strs[4]))
-            b[{'wood': 14, 'coal': 15, 'uranium': 16}[r_type], x, y] = amt / 800
+            b[{'wood': 12, 'coal': 13, 'uranium': 14}[r_type], x, y] = amt / 800
         elif input_identifier == 'rp':
             # Research Points
             team = int(strs[1])
             rp = int(strs[2])
-            b[17 + (team - obs['player']) % 2, :] = min(rp, 200) / 200
+            global_b[0 + (team - obs['player']) % 2, :] = min(rp, 200) / 200
         elif input_identifier == 'c':
             # Cities
             city_id = strs[2]
@@ -264,60 +284,35 @@ def make_input(obs, unit_id, n_obs_channel):
             x = int(strs[1]) + x_shift
             y = int(strs[2]) + y_shift
             road_level = float(strs[3])
-            b[19, x, y] =  road_level / 6
+            b[15, x, y] =  road_level / 6
     
     # Day/Night Cycle
-    b[20, :] = obs['step'] % 40 / 40
+    global_b[2, :] = obs['step'] % 40 / 40
     # Turns
-    b[21, :] = obs['step'] / 360
+    global_b[3, :] = obs['step'] / 360
+    global_b[4, :] = own_unit_counts / 100
+    global_b[5, :] = opponent_unit_counts / 100
+    global_b[6, :] = own_citytile_counts / 100
+    global_b[7, :] = opponent_citytile_counts / 100
+
     # Map Size
-    b[22, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
-    return b
-
-# Neural Network for Lux AI
-class BasicConv2d(nn.Module):
-    def __init__(self, input_dim, output_dim, kernel_size, bn):
-        super().__init__()
-        self.conv = nn.Conv2d(
-            input_dim, output_dim, 
-            kernel_size=kernel_size, 
-            padding=(kernel_size[0] // 2, kernel_size[1] // 2)
-        )
-        self.bn = nn.BatchNorm2d(output_dim) if bn else None
-
-    def forward(self, x):
-        h = self.conv(x)
-        h = self.bn(h) if self.bn is not None else h
-        return h
-
-class LuxNet(BaseFeaturesExtractor):
-    def __init__(self, observation_space, features_dim):
-        super(LuxNet, self).__init__(observation_space, features_dim)
-        layers, filters = 12, 32
-        self.n_obs_channel = observation_space.shape[0]
-        self.conv0 = BasicConv2d(self.n_obs_channel, filters, (3, 3), False)
-        self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
-        self.head_p = nn.Linear(filters, features_dim, bias=False)
-        # self.head_v = nn.Linear(filters*2, 1, bias=False)  # for value(reward)
-
-    def forward(self, x):
-        h = F.relu_(self.conv0(x))
-        for block in self.blocks:
-            h = F.relu_(h + block(h))
-        # h = (batch, c, w, h) -> (batch, c) 
-        # h:(64,32,32,32)
-        h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # h=head: (64, 32)
-        # h_avg = h.view(h.size(0), h.size(1), -1).mean(-1)  # h_avg: (64, 32)
-        p = self.head_p(h_head)  # policy
-        # v = torch.tanh(self.head_v(torch.cat([h_head, h_avg], dim=1)))  # value
-        return p  #
+    b[16, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
+    
+    actions_map = np.zeros((32, 32), dtype=np.float32)  # 4d + bcity
+    actions_mask = np.zeros((32, 32), dtype=np.float32)  # 4d + bcity
+    for a in acts:
+        label, unit_id = to_label(a)
+        if (label is not None)&(unit_id == target_unit_id):
+            (x,y) = own_actionable_units[unit_id]
+            actions_map[x,y] = label
+            actions_mask[x,y] = 1
+    return b, global_b, actions_map, actions_mask
 
 
 class LuxDataset(Dataset):
     def __init__(self, df, data_dir,phase='train'):
         self.obs_ids = df['obs_id'].to_numpy()
         self.unit_ids = df['unit_id'].to_numpy()
-        self.actions = df["label"].to_numpy()
         self.data_dir = data_dir 
         self.phase = phase
         
@@ -327,12 +322,116 @@ class LuxDataset(Dataset):
     def __getitem__(self, idx):
         obs_id = self.obs_ids[idx]
         with open(self.data_dir + f"{obs_id}.pickle", mode="rb") as f:    
-            obs = pickle.load(f)
+            (obs, acts) = pickle.load(f)
         unit_id = self.unit_ids[idx]
-        state = make_input(obs, unit_id, 23)
-        action = self.actions[idx]
-        return state, action
+        state, global_feats, actions, actions_mask = make_input(obs, acts, unit_id)
+        # north_state, global_feats, actions, actions_mask = make_input(obs, acts, unit_id)
+        # west_state = np.rot90(north_state,1, axes=(1,2))
+        # south_state = np.rot90(north_state,2, axes=(1,2))
+        # east_state = np.rot90(north_state,3, axes=(1,2))
+        # state = np.stack([north_state, west_state, south_state, east_state])
+        # global_feats = np.stack([global_feats,global_feats, global_feats,global_feats])
+        return state, global_feats, actions, actions_mask
 
+""" Parts of the U-Net model """
+class DoubleConv(nn.Module):
+    """(convolution => [BN] => ReLU) * 2"""
+
+    def __init__(self, in_channels, out_channels, mid_channels=None):
+        super().__init__()
+        if not mid_channels:
+            mid_channels = out_channels
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        return self.double_conv(x)
+
+
+class Down(nn.Module):
+    """Downscaling with maxpool then double conv"""
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.maxpool_conv = nn.Sequential(
+            nn.MaxPool2d(2),
+            DoubleConv(in_channels, out_channels)
+        )
+
+    def forward(self, x):
+        return self.maxpool_conv(x)
+
+
+class Up(nn.Module):
+    """Upscaling then double conv"""
+
+    def __init__(self, in_channels, out_channels, bilinear=True):
+        super().__init__()
+
+        # if bilinear, use the normal convolutions to reduce the number of channels
+        if bilinear:
+            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+            self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
+        else:
+            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+            self.conv = DoubleConv(in_channels, out_channels)
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        # input is CHW
+        diffY = x2.size()[2] - x1.size()[2]
+        diffX = x2.size()[3] - x1.size()[3]
+
+        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
+                        diffY // 2, diffY - diffY // 2])
+        # if you have padding issues, see
+        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
+        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
+        x = torch.cat([x2, x1], dim=1)
+        return self.conv(x)
+
+
+class OutConv(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(OutConv, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+
+    def forward(self, x):
+        return self.conv(x)
+
+class LuxUNet(nn.Module):
+    def __init__(self, n_channels, n_classes, bilinear=True):
+        super(LuxUNet, self).__init__()
+        self.n_channels = n_channels
+        self.n_classes = n_classes
+        self.bilinear = bilinear
+
+        self.inc = DoubleConv(n_channels, 64)
+        self.down1 = Down(64, 128)
+        self.down2 = Down(128, 256)
+        self.down3 = Down(256, 256)  # h,wは変化しなくない？
+        factor = 2 if bilinear else 1
+        self.up1 = Up(256*2+8, 256 // factor, bilinear)
+        self.up2 = Up(256, 128 // factor, bilinear)
+        self.up3 = Up(128, 64, bilinear)
+        self.outc = OutConv(64, n_classes)
+
+    def forward(self, obs, global_feats):
+        x1 = self.inc(obs)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)  # (8,8)
+        x4 = torch.cat([self.down3(x3), global_feats], dim=1)  # (batch,256,4,4) + (batch,4,4,4)
+        x = self.up1(x4, x3)
+        x = self.up2(x, x2)
+        x = self.up3(x, x1)
+        logits = self.outc(x)
+        return logits
 
 def train_model(model, dataloaders_dict, p_criterion,optimizer, scheduler=None, num_epochs=2):
     best_acc = 0.0
@@ -347,35 +446,38 @@ def train_model(model, dataloaders_dict, p_criterion,optimizer, scheduler=None, 
                 
             epoch_ploss = 0.0
             epoch_num_correct = 0
+            epoch_data_size = 0
             dataloader = dataloaders_dict[phase]
             for item in tqdm(dataloader, leave=False):        
                 
                 states = item[0].cuda().float()
-                # global_feats = item[1].cuda().float()
-                actions = item[1].cuda().long()
-                # actions_mask = item[3].cuda().long()
+                global_feats = item[1].cuda().float()
+                actions = item[2].cuda().long()
+                actions_mask = item[3].cuda().long()
                 
                 batch_size = item[0].shape[0]
                 optimizer.zero_grad()
                 
                 with torch.set_grad_enabled(phase == 'train'):
                     # 4directionを1つにまとめる
-                    policy = model(states)  # (batch*4,3)
-                    policy_loss = p_criterion(policy, actions)
+                    batch_states = states.view((-1, 17,32,32))  # (batch*4,23,32,32)
+                    batch_global_feats = global_feats.view((-1,8,4,4))
+                    policy = model(batch_states, batch_global_feats)  # (batch*4,3)
+                    targets = actions[actions_mask > 0]
+                    predicts = policy[torch.stack([actions_mask]*6, dim=1) > 0].view(-1, 6)
+                    policy_loss = p_criterion(predicts, targets)
                     loss = policy_loss
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
 
-                    preds = torch.max(policy, 1)[1]
-                    batch_size = len(policy)
-                    epoch_ploss += policy_loss.item() * batch_size
-                    num_correct = (preds.cpu() == actions.data.cpu())
-                    epoch_num_correct += torch.sum(num_correct)
+                    epoch_num_correct += torch.sum(torch.max(predicts, 1)[1] == targets).cpu()
+                    data_size = actions_mask.count_nonzero().cpu()
+                    epoch_data_size += data_size 
+                    epoch_ploss += policy_loss.item() * data_size
 
-            data_size = len(dataloader.dataset)
-            epoch_ploss = epoch_ploss / data_size
-            epoch_acc = epoch_num_correct.double() / data_size
+            epoch_ploss = epoch_ploss / epoch_data_size
+            epoch_acc = epoch_num_correct.double() / epoch_data_size
 
             if phase == 'train':
                 wandb.log({'Loss/train': epoch_ploss, 'ACC/train': epoch_acc})
@@ -384,11 +486,12 @@ def train_model(model, dataloaders_dict, p_criterion,optimizer, scheduler=None, 
                 wandb.log({'Loss/val': epoch_ploss, 'ACC/val': epoch_acc})
                 logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Acc: {epoch_acc:.4f}')
         
-        if (epoch_acc > best_acc)&(phase=="val"):
-            dummy_obs = torch.rand(1, 23, 32, 32)
-            traced = torch.jit.trace(model.cpu(), dummy_obs)
+        if epoch_acc > best_acc:
+            dummy_obs = torch.rand(1, 17, 32, 32)
+            dummy_global_obs = torch.rand(1,8,4,4)
+            traced = torch.jit.trace(model.cpu(), (dummy_obs, dummy_global_obs))
             traced.save('best_jit.pth')
-            # torch.save(model.cpu().state_dict(), 'best.pth')
+            torch.save(model.cpu().state_dict(), 'best.pth')
             best_acc = epoch_acc
 
         if scheduler is not None:
@@ -401,8 +504,8 @@ def main():
     target_team_name = team_names[0]
     print("target team:", target_team_name)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
-    run_id = f'simple_IL_6action_{target_team_name}_v'
-    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME, id=run_id) 
+    run_id = f'UNet_IL_{target_team_name}_v1'
+    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME, id=run_id, mode='disabled') 
 
     episode_dir = "../../input/lux_ai_top_team_episodes_1124/"
     data_dir = "./tmp_data/"
@@ -426,6 +529,10 @@ def main():
     print(_df['label'].value_counts())
 
     logger.info(f"obses:{df['obs_id'].nunique()} samples:{len(df)}")
+    # labels = _df['label'].to_numpy()
+    # actions = ['center','north', 'west', 'south', 'east', 'bcity']
+    # for value, count in zip(*np.unique(labels, return_counts=True)):
+    #     logger.info(f'{actions[value]:^5}: {count:>3}')
 
     train_df, val_df = train_test_split(_df, test_size=0.1, random_state=seed, stratify=_df['ep_id'])
 
@@ -444,16 +551,11 @@ def main():
     )
     dataloaders_dict = {"train": train_loader, "val": val_loader}
     p_criterion = nn.CrossEntropyLoss()
-
-    n_obs_channel = 23
-    observation_space = spaces.Box(low=0, high=1, shape=(n_obs_channel, 32, 32), dtype=np.float16)
-    model = LuxNet(observation_space=observation_space, features_dim=6)
+    model = LuxUNet(n_channels=17, n_classes=6)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
     train_model(model, dataloaders_dict, p_criterion, optimizer, num_epochs=10)
     wandb.finish()
-    shutil.rmtree(data_dir)
-
 
 if __name__ == '__main__':
     main()
