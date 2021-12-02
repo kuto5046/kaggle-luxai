@@ -504,11 +504,9 @@ def train_model(model, dataloaders_dict, p_criterion,optimizer, scheduler=None, 
                 logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Acc: {epoch_acc:.4f}')
         
         if epoch_acc > best_acc:
-            dummy_obs = torch.rand(4, 17, 32, 32)
+            dummy_obs = torch.rand(4,17, 32, 32)
             dummy_global_obs = torch.rand(4,8,4,4)
-            traced = torch.jit.trace(model.cpu(), (dummy_obs, dummy_global_obs))
-            traced.save('best_jit.pth')
-            torch.save(model.cpu().state_dict(), 'best.pth')
+            torch.onnx.export(model.cpu(), (dummy_obs, dummy_global_obs), "best.onnx", input_names=["obs", "global_obs"], opset_version=11)
             best_acc = epoch_acc
 
         if scheduler is not None:
@@ -521,10 +519,10 @@ def main():
     target_team_name = team_names[0]
     print("target team:", target_team_name)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
-    run_id = f'UNet_IL_{target_team_name}_v1'
-    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME, id=run_id, mode='disabled') 
+    run_id = f'UNet_IL_{target_team_name}_v2'
+    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME, id=run_id)  # , mode='disabled') 
 
-    episode_dir = "../../input/lux_ai_top_team_episodes_1124/"
+    episode_dir = "../../input/lux_ai_top_team_episodes_1129/"
     data_dir = "./tmp_data/"
     df = create_dataset_from_json(episode_dir, data_dir, team_name=target_team_name, only_win=True)
     target_sub_ids_dict = {
