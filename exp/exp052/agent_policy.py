@@ -87,8 +87,8 @@ class OutConv(nn.Module):
 class CustomFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim):
         super(CustomFeatureExtractor, self).__init__(observation_space, features_dim)
-        n_obs_channel = observation_space["obs"].shape[0]
-        n_global_obs_channel = observation_space["global_obs"].shape[0]
+        n_obs_channel = observation_space["obs"].shape[1]
+        n_global_obs_channel = observation_space["global_obs"].shape[1]
         bilinear = True 
         self.inc = DoubleConv(n_obs_channel, 64)
         self.down1 = Down(64, 128)
@@ -103,10 +103,7 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
     def forward(self, input):
         obses = input["obs"].view(-1, 17, 32,32)
         global_obses = input["global_obs"].view(-1, 8, 4, 4)
-        # TracerWarning: Converting a tensor to a Python integer might cause the trace to be incorrect. 
-        # We can't record the data flow of Python values, so this value will be treated as a constant in the future. 
-        # This means that the trace might not generalize to other inputs!
-        # batch_size = int(obses.shape[0] / 4)
+
         batch_size = torch.div(obses.shape[0], 4, rounding_mode='trunc').item()
         x1 = self.inc(obses)
         x2 = self.down1(x1)
@@ -117,9 +114,14 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
         x = self.up3(x, x1)
         _policy = self.outc(x)
         _policy = _policy.view((batch_size, 4, 3, 32, 32))
-        _policy[:, 1] = torch.rot90(_policy[:, 1], k=-1, dims=(2,3)) # -90回転
-        _policy[:, 2] = torch.rot90(_policy[:, 2], k=-2, dims=(2,3)) # -180回転
-        _policy[:, 3] = torch.rot90(_policy[:, 3], k=-3, dims=(2,3)) # -270回転
+        # inplace rot90 to transpose and flip because onnx can't support torch.rot90
+        # _policy[:, 1] = torch.rot90(_policy[:, 1], k=-1, dims=(2,3)) # -90回転
+        # _policy[:, 2] = torch.rot90(_policy[:, 2], k=-2, dims=(2,3)) # -180回転
+        # _policy[:, 3] = torch.rot90(_policy[:, 3], k=-3, dims=(2,3)) # -270回転
+        _policy[:, 1] = _policy[:, 1].flip(dims=(2,)).transpose(2,3)  # -90回転
+        _policy[:, 2] = _policy[:, 2].flip(dims=(2,3))  # -180回転
+        _policy[:, 3] = _policy[:, 3].transpose(2,3).flip(dims=(2,))  # -270回転
+
         center_policy = _policy[:,:, 0].mean(dim=1).view((-1,1,32,32))  # (64,1,32,32)
         move_policy = _policy[:,:, 1]  # (64, 4, 32,32)
         bcity_policy = _policy[:,:, 2].mean(dim=1).view((-1,1,32,32))  # (64,1,32,32)
@@ -220,8 +222,8 @@ class ImitationAgent(Agent):
         ]
         self.action_space = spaces.Discrete(len(self.actions_units))
         self.observation_space = spaces.Dict(
-            {"obs":spaces.Box(low=0, high=1, shape=(17, 32, 32), dtype=np.float32), 
-            "global_obs":spaces.Box(low=0, high=1, shape=(8, 4, 4), dtype=np.float32),
+            {"obs":spaces.Box(low=0, high=1, shape=(4, 17, 32, 32), dtype=np.float32), 
+            "global_obs":spaces.Box(low=0, high=1, shape=(4, 8, 4, 4), dtype=np.float32),
             "mask":spaces.Box(low=0, high=1, shape=(len(self.actions_units), 32, 32), dtype=np.long),
             })
         self.model = model
@@ -236,6 +238,10 @@ class ImitationAgent(Agent):
         policy = _policy[0].detach().numpy()  # (6, 32, 32)
         return policy
 
+    def onnx_predict(self, input):
+        policy, value  = self.model.run(None, {"obs": input["obs"], "global_obs": input["global_obs"]})
+        return policy[0], value[0]
+    
     def action_code_to_action(self, action_code, game, unit=None, city_tile=None, team=None):
         """
         Takes an action in the environment according to actionCode:
@@ -308,7 +314,8 @@ class ImitationAgent(Agent):
         x_shift = (32 - game.map.width) // 2
         y_shift = (32 - game.map.height) // 2
         obs = self.get_observation(game, None, None, team)
-        policy_map = self.torch_predict(obs)
+        # policy_map = self.torch_predict(obs)
+        policy_map, value = self.onnx_predict(obs)
         units = game.get_teams_units(team)
         for unit in units.values():
             if unit.can_act():
@@ -349,8 +356,8 @@ class ImitationAgent(Agent):
         x_shift = (32 - width) // 2
         y_shift = (32 - height) // 2
 
-        b = np.zeros(self.observation_space["obs"].shape, dtype=np.float32)
-        global_b = np.zeros(self.observation_space["global_obs"].shape, dtype=np.float32)
+        b = np.zeros(self.observation_space["obs"].shape[1:], dtype=np.float32)
+        global_b = np.zeros(self.observation_space["global_obs"].shape[1:], dtype=np.float32)
         action_mask = np.zeros(self.observation_space["mask"].shape, dtype=np.float32)
         opponent_team = 1 - team
         # unit

@@ -4,6 +4,7 @@ from pathlib import Path
 import pickle
 import os
 import shutil
+import copy 
 import wandb
 import random
 import logging
@@ -362,7 +363,7 @@ def train_model(model, dataloaders_dict, p_criterion,optimizer, scheduler=None, 
                 with torch.set_grad_enabled(phase == 'train'):
                     feats = model.features_extractor({"obs": states, "global_obs": global_feats, "mask":action_mask})  # (batch*4,3)
                     policy_latent, value_latent = model.mlp_extractor(feats)
-                    policy = model.action_net(policy_latent)  # ほぼ学習しない
+                    policy = model.action_net(policy_latent)  # 学習しない
                     value = model.value_net(value_latent)
 
                     policy_loss = p_criterion(policy, actions)
@@ -398,8 +399,10 @@ def train_model(model, dataloaders_dict, p_criterion,optimizer, scheduler=None, 
                 model.mlp_extractor, 
                 model.value_net
             )
-            traced = torch.jit.trace(rl_model.cpu(), {"obs":dummy_obs, "global_obs":dummy_global_obs, "mask": dummy_mask})
-            traced.save('./models/best_jit.pth')
+            copy_model = copy.deepcopy(rl_model)  # c
+            torch.onnx.export(copy_model, {"obs": dummy_obs, "global_obs": dummy_global_obs, "mask": dummy_mask}, f"./models/bc_policy.onnx", input_names=["obs", "global_obs", "mask"], opset_version=11)
+            # traced = torch.jit.trace(rl_model.cpu(), {"obs":dummy_obs, "global_obs":dummy_global_obs, "mask": dummy_mask})
+            # traced.save('./models/best_jit.pth')
             best_acc = epoch_acc
 
         if scheduler is not None:
@@ -412,8 +415,8 @@ def main():
     target_team_name = team_names[0]
     print("target team:", target_team_name)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
-    run_id = f'UNet_BC_6action_{target_team_name}_v1'
-    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME, id=run_id) #, mode="disabled") 
+    run_id = f'UNet_BC_3action_{target_team_name}_v2'
+    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME, id=run_id)  #, mode="disabled") 
 
     episode_dir = "../../input/lux_ai_top_team_episodes_1129/"
     data_dir = "./tmp_data/"
@@ -443,13 +446,13 @@ def main():
         LuxDataset(train_df, data_dir, phase='train'), 
         batch_size=batch_size, 
         shuffle=True, 
-        num_workers=12
+        num_workers=8
     )
     val_loader = DataLoader(
         LuxDataset(val_df, data_dir, phase='val'), 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=12
+        num_workers=8
     )
     dataloaders_dict = {"train": train_loader, "val": val_loader}
     p_criterion = nn.CrossEntropyLoss()
@@ -458,8 +461,8 @@ def main():
     n_global_obs_channel = 8
     action_space = spaces.Discrete(6)
     observation_space = spaces.Dict(
-            {"obs":spaces.Box(low=0, high=1, shape=(n_obs_channel, 32, 32), dtype=np.float32), 
-            "global_obs":spaces.Box(low=0, high=1, shape=(n_global_obs_channel, 4, 4), dtype=np.float32),
+            {"obs":spaces.Box(low=0, high=1, shape=(4,n_obs_channel, 32, 32), dtype=np.float32), 
+            "global_obs":spaces.Box(low=0, high=1, shape=(4,n_global_obs_channel, 4, 4), dtype=np.float32),
             "mask":spaces.Box(low=0, high=1, shape=(6, 32, 32), dtype=np.long),
             })
     model = CustomActorCriticCnnPolicy(

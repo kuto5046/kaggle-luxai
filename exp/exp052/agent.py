@@ -5,12 +5,11 @@ sys.path.append("../../LuxPythonEnvGym/")
 from luxai2021.game.constants import LuxMatchConfigs_Default, LuxMatchConfigs_Replay
 from agent_policy import ImitationAgent
 from luxai2021.game.game import Game 
+import onnxruntime as ort 
 
 path = '/kaggle_simulations/agent' if os.path.exists('/kaggle_simulations') else '.'
-model_path = path + '/models/best_jit.pth'
-model = torch.jit.load(model_path)  
-model.eval()
-
+model_path = path + '/models/bc_policy.onnx'
+model = ort.InferenceSession(model_path)
 _agent = ImitationAgent(model)
 
 game_state = None
