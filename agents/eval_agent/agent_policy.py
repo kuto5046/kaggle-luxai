@@ -12,6 +12,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import gym 
 import random 
+import glob 
+import onnxruntime as ort 
 
 class EvalImitationAgent(Agent):
     def __init__(self, model=None) -> None:
@@ -26,17 +28,21 @@ class EvalImitationAgent(Agent):
         ]
         self.action_space = spaces.Discrete(len(self.actions_units))
         self.observation_space = spaces.Box(low=0, high=1, shape=(17, 32, 32), dtype=np.float32)
-        self.model = model
-        self.tta = TTA()
+        self.model = None 
 
-    def torch_predict(self, obs, global_obs):
+    def set_model(self):
+        model_path = '/work/agents/eval_agent/models/toad_1202.onnx'  
+        self.model = ort.InferenceSession(model_path)
+        print(f'[Eval Imitation Agent] set model by {model_path}')
+
+    def torch_predict(self, obs, global_obs):            
         west_obs = np.rot90(obs, 1, axes=(1,2))
         south_obs = np.rot90(obs, 2, axes=(1,2))
         east_obs = np.rot90(obs, 3, axes=(1,2))
         obses = np.stack([obs, west_obs, south_obs, east_obs])
         global_obses = np.stack([global_obs, global_obs, global_obs, global_obs])
         with torch.no_grad():
-          _policy = self.model(torch.from_numpy(obses), torch.from_numpy(global_obses))  # p=(4, 3, 32, 32)
+            _policy = self.model(torch.from_numpy(obses), torch.from_numpy(global_obses))  # p=(4, 3, 32, 32)
         _policy = _policy.detach().numpy()
         _policy[1] = np.rot90(_policy[1], -1, axes=(1,2))
         _policy[2] = np.rot90(_policy[2], -2, axes=(1,2))
@@ -46,7 +52,25 @@ class EvalImitationAgent(Agent):
         bcity_policy = np.expand_dims(_policy[:, 2].mean(axis=0), 0)  # (32,32) 
         policy = np.concatenate([center_policy, move_policy, bcity_policy])  # (6,32,32)
         return policy
-        
+
+    def onnx_predict(self, obs, global_obs):
+        west_obs = np.rot90(obs, 1, axes=(1,2))
+        south_obs = np.rot90(obs, 2, axes=(1,2))
+        east_obs = np.rot90(obs, 3, axes=(1,2))
+        obses = np.stack([obs, west_obs, south_obs, east_obs])
+        global_obses = np.stack([global_obs, global_obs, global_obs, global_obs])
+        _policy = self.model.run(None, {"obs": obses, "global_obs": global_obses})[0]
+        # _policy = self.model(torch.from_numpy(obses), torch.from_numpy(global_obses))  # p=(4, 3, 32, 32)
+        _policy[1] = np.rot90(_policy[1], -1, axes=(1,2))
+        _policy[2] = np.rot90(_policy[2], -2, axes=(1,2))
+        _policy[3] = np.rot90(_policy[3], -3, axes=(1,2))
+        center_policy = np.expand_dims(_policy[:,0].mean(axis=0), 0)# (32,32) 
+        move_policy = _policy[:, 1]  # (4,32,32)
+        bcity_policy = np.expand_dims(_policy[:, 2].mean(axis=0), 0)  # (32,32) 
+        policy = np.concatenate([center_policy, move_policy, bcity_policy])  # (6,32,32)
+        return policy
+
+
     def action_code_to_action(self, action_code, game, unit=None, city_tile=None, team=None):
         """
         Takes an action in the environment according to actionCode:
@@ -104,13 +128,13 @@ class EvalImitationAgent(Agent):
                         # 保有unit数(worker)よりもcity tileの数が多いならworkerを追加
                         # 夜ならunitは作らない
                         # rpの更新直前はrpを優先する
-                        if (unit_count < city_tile_count):
+                        if unit_count < city_tile_count:
                             action = SpawnWorkerAction(team, None, x, y)
                             actions.append(action)
                             unit_count += 1
                         # # ウランの研究に必要な数のresearch pointを満たしていなければ研究をしてresearch pointを増やす
                         # unitが少ない場合(<3)はcooldownを温存して次のturn以降でworker buildをしたい
-                        elif (game.state["teamStates"][team]["researchPoints"] < 200):
+                        elif game.state["teamStates"][team]["researchPoints"] < 200:
                             action = ResearchAction(team, x, y, None)
                             actions.append(action)
                             game.state["teamStates"][team]["researchPoints"] += 1
@@ -122,7 +146,8 @@ class EvalImitationAgent(Agent):
         x_shift = (32 - game.map.width) // 2
         y_shift = (32 - game.map.height) // 2
         obs, global_obs = self.get_observation(game, team)
-        policy_map = self.torch_predict(obs, global_obs)
+        # policy_map = self.torch_predict(obs, global_obs)
+        policy_map = self.onnx_predict(obs, global_obs)
         units = game.get_teams_units(team)
         for unit in units.values():
             if unit.can_act():
@@ -143,12 +168,14 @@ class EvalImitationAgent(Agent):
         Returns: Array of actions to perform.
         """
         start_time = time.time()
+        if self.model is None:
+            self.set_model()
         unit_actions = self.process_unit_turn(game, team)
         city_actions = self.process_city_turn(game, team)
         actions = unit_actions + city_actions
         time_taken = time.time() - start_time
         if time_taken > 1.0:  # Warn if larger than 0.5 seconds.
-            print("[RL Agent]WARNING: Inference took %.3f seconds for computing actions. Limit is 3 second." % time_taken,
+            print("[Imitation Agent]WARNING: Inference took %.3f seconds for computing actions. Limit is 3 second." % time_taken,
                   file=sys.stderr)
         return actions
         
