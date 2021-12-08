@@ -16,118 +16,43 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.policies import ActorCriticCnnPolicy
 from typing import Callable, Dict, List, Optional, Tuple, Type, Union
 
-class DoubleConv(nn.Module):
-    """(convolution => [BN] => ReLU) * 2"""
 
-    def __init__(self, in_channels, out_channels, mid_channels=None):
+class BasicConv2d(nn.Module):
+    def __init__(self, input_dim, output_dim, kernel_size, bn):
         super().__init__()
-        if not mid_channels:
-            mid_channels = out_channels
-        self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(mid_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
+        self.conv = nn.Conv2d(
+            input_dim, output_dim, 
+            kernel_size=kernel_size, 
+            padding=(kernel_size[0] // 2, kernel_size[1] // 2)
         )
+        self.bn = nn.BatchNorm2d(output_dim) if bn else None
 
     def forward(self, x):
-        return self.double_conv(x)
+        h = self.conv(x)
+        h = self.bn(h) if self.bn is not None else h
+        return h
 
-class Down(nn.Module):
-    """Downscaling with maxpool then double conv"""
 
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        self.maxpool_conv = nn.Sequential(
-            nn.MaxPool2d(2),
-            DoubleConv(in_channels, out_channels)
-        )
-
-    def forward(self, x):
-        return self.maxpool_conv(x)
-
-class Up(nn.Module):
-    """Upscaling then double conv"""
-
-    def __init__(self, in_channels, out_channels, bilinear=True):
-        super().__init__()
-
-        # if bilinear, use the normal convolutions to reduce the number of channels
-        if bilinear:
-            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-            self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
-        else:
-            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
-            self.conv = DoubleConv(in_channels, out_channels)
-
-    def forward(self, x1, x2):
-        x1 = self.up(x1)
-        # input is CHW
-        diffY = x2.size()[2] - x1.size()[2]
-        diffX = x2.size()[3] - x1.size()[3]
-
-        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
-                        diffY // 2, diffY - diffY // 2])
-        # if you have padding issues, see
-        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
-        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
-        x = torch.cat([x2, x1], dim=1)
-        return self.conv(x)
-
-class OutConv(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(OutConv, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
-
-    def forward(self, x):
-        return self.conv(x)
-  
 class CustomFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim):
         super(CustomFeatureExtractor, self).__init__(observation_space, features_dim)
-        n_obs_channel = observation_space["obs"].shape[1]
-        n_global_obs_channel = observation_space["global_obs"].shape[1]
-        bilinear = True 
-        self.inc = DoubleConv(n_obs_channel, 64)
-        self.down1 = Down(64, 128)
-        self.down2 = Down(128, 256)
-        self.down3 = Down(256, 256)  # h,wは変化しなくない？
-        factor = 2 if bilinear else 1
-        self.up1 = Up(512+n_global_obs_channel, 256 // factor, bilinear)
-        self.up2 = Up(256, 128 // factor, bilinear)
-        self.up3 = Up(128, 64, bilinear)
-        self.outc = OutConv(64, 3)
+        layers, filters = 12, 32
+        self.n_obs_channel = observation_space.shape[0]
+        self.conv0 = BasicConv2d(self.n_obs_channel, filters, (3, 3), False)
+        self.blocks = nn.ModuleList([BasicConv2d(filters, filters, (3, 3), True) for _ in range(layers)])
+        self.head_p = nn.Linear(filters, 3, bias=False)
+        self.head_v = nn.Linear(filters * 2, 1, bias=False)
 
-    def forward(self, input):
-        obses = input["obs"].view(-1, 17, 32,32)
-        global_obses = input["global_obs"].view(-1, 8, 4, 4)
+    def forward(self, x):
+        h = F.relu_(self.conv0(x))
+        for block in self.blocks:
+            h = F.relu_(h + block(h))
+        h_head = (h * x[:,:1]).view(h.size(0), h.size(1), -1).sum(-1)  # (filter)
+        h_avg = h.view(h.size(0), h.size(1), -1).mean(-1)
+        p = torch.softmax(self.head_p(h_head), 1)
+        v = torch.tanh(self.head_v(torch.cat([h_head, h_avg], dim=1)))
+        return (p,v)
 
-        batch_size = torch.div(obses.shape[0], 4, rounding_mode='trunc').item()
-        x1 = self.inc(obses)
-        x2 = self.down1(x1)
-        x3 = self.down2(x2)  # (8,8)
-        x4 = torch.cat([self.down3(x3), global_obses], dim=1)
-        x = self.up1(x4, x3)
-        x = self.up2(x, x2)
-        x = self.up3(x, x1)
-        _policy = self.outc(x)
-        _policy = _policy.view((batch_size, 4, 3, 32, 32))
-        # inplace rot90 to transpose and flip because onnx can't support torch.rot90
-        # _policy[:, 1] = torch.rot90(_policy[:, 1], k=-1, dims=(2,3)) # -90回転
-        # _policy[:, 2] = torch.rot90(_policy[:, 2], k=-2, dims=(2,3)) # -180回転
-        # _policy[:, 3] = torch.rot90(_policy[:, 3], k=-3, dims=(2,3)) # -270回転
-        _policy[:, 1] = _policy[:, 1].flip(dims=(2,)).transpose(2,3)  # -90回転
-        _policy[:, 2] = _policy[:, 2].flip(dims=(2,3))  # -180回転
-        _policy[:, 3] = _policy[:, 3].transpose(2,3).flip(dims=(2,))  # -270回転
-
-        center_policy = _policy[:,:, 0].mean(dim=1).view((-1,1,32,32))  # (64,1,32,32)
-        move_policy = _policy[:,:, 1]  # (64, 4, 32,32)
-        bcity_policy = _policy[:,:, 2].mean(dim=1).view((-1,1,32,32))  # (64,1,32,32)
-        policy_logits = torch.cat([center_policy, move_policy, bcity_policy], dim=1)
-        value_logits = x4.view(x4.shape[0], x4.shape[1], -1).mean(-1).view(batch_size, 4, -1).mean(1)
-        return (policy_logits, value_logits, input["mask"])
 
 class CustomMlpExtractor(nn.Module):
     """
@@ -142,7 +67,7 @@ class CustomMlpExtractor(nn.Module):
     def __init__(
         self,
         features_dim: int,
-        last_layer_dim_pi: int = 6,
+        last_layer_dim_pi: int = 64,
         last_layer_dim_vf: int = 64,
     ):
         super(CustomMlpExtractor, self).__init__()
@@ -152,10 +77,12 @@ class CustomMlpExtractor(nn.Module):
         self.latent_dim_pi = last_layer_dim_pi
         self.latent_dim_vf = last_layer_dim_vf
 
-        # Policy network(3次元を1次元にする)
-        # self.policy_net = nn.Sequential(
-
-        # )
+        # Policy network
+        self.policy_net = nn.Sequential(
+            # nn.Linear(features_dim, last_layer_dim_pi), 
+            # nn.BatchNorm1d(last_layer_dim_pi),
+            # nn.ReLU(),
+        )
         # Value network
         self.value_net = nn.Sequential(
             nn.Linear(features_dim, last_layer_dim_vf),
@@ -168,15 +95,14 @@ class CustomMlpExtractor(nn.Module):
         :return: (th.Tensor, th.Tensor) latent_policy, latent_value of the specified network.
             If all layers are shared, then ``latent_policy == latent_value``
         """
-        batch_size = features[0].shape[0]
-        return features[0][features[2] > 0].view(batch_size, 6), self.value_net(features[1])
+        return self.policy_net(features), self.value_net(features)
 
     def forward_actor(self, features):
-        batch_size = features[0].shape[0]
-        return features[0][features[2] > 0].view(batch_size, 6)
+        return self.policy_net(features)
 
     def forward_critic(self, features):
-        return self.value_net(features[1])
+        return self.value_net(features)
+
 
 class CustomActorCriticCnnPolicy(ActorCriticCnnPolicy):
     def __init__(
@@ -205,8 +131,10 @@ class CustomActorCriticCnnPolicy(ActorCriticCnnPolicy):
         
         # don't anything in action net
         self.action_net = nn.Sequential()
+
     def _build_mlp_extractor(self) -> None:
         self.mlp_extractor = CustomMlpExtractor(self.features_dim)
+
 
 class ImitationAgent(Agent):
     def __init__(self, model=None) -> None:
@@ -220,25 +148,11 @@ class ImitationAgent(Agent):
             SpawnCityAction,
         ]
         self.action_space = spaces.Discrete(len(self.actions_units))
-        self.observation_space = spaces.Dict(
-            {"obs":spaces.Box(low=0, high=1, shape=(4, 17, 32, 32), dtype=np.float32), 
-            "global_obs":spaces.Box(low=0, high=1, shape=(4, 8, 4, 4), dtype=np.float32),
-            "mask":spaces.Box(low=0, high=1, shape=(len(self.actions_units), 32, 32), dtype=np.long),
-            })
+        self.observation_space = spaces.Box(low=0, high=1, shape=(4, 23, 32, 32), dtype=np.float32)
         self.model = model
 
-    def torch_predict(self, obs):
-        with torch.no_grad():
-            _policy, value = self.model({
-              "obs": torch.from_numpy(obs["obs"]), 
-              "global_obs": torch.from_numpy(obs["global_obs"]),
-              "mask": torch.from_numpy(np.expand_dims(obs["mask"], axis=0))
-              })
-        policy = _policy[0].detach().numpy()  # (6, 32, 32)
-        return policy
-
     def onnx_predict(self, input):
-        policy, value  = self.model.run(None, {"obs": input["obs"], "global_obs": input["global_obs"]})
+        policy, value  = self.model.run(None, {"input.1": input})
         return policy[0], value[0]
     
     def action_code_to_action(self, action_code, game, unit=None, city_tile=None, team=None):

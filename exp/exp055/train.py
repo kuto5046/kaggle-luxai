@@ -433,7 +433,6 @@ def main():
     print(_df['label'].value_counts())
 
     # under sampling center action
-    _df['label'].dropna(inplace=True)
     num_sample = int(_df.loc[_df['label'] > 0, 'label'].value_counts().mean())
     center_df = _df[_df['label'] == 0].sample(num_sample)
     other_df = _df[_df['label'] > 0]
@@ -461,11 +460,8 @@ def main():
     n_obs_channel = 17
     n_global_obs_channel = 8
     action_space = spaces.Discrete(6)
-    observation_space = spaces.Dict(
-            {"obs":spaces.Box(low=0, high=1, shape=(4,n_obs_channel, 32, 32), dtype=np.float32), 
-            "global_obs":spaces.Box(low=0, high=1, shape=(4,n_global_obs_channel, 4, 4), dtype=np.float32),
-            "mask":spaces.Box(low=0, high=1, shape=(6, 32, 32), dtype=np.long),
-            })
+    observation_space = spaces.Box(low=0, high=1, shape=(4,n_obs_channel, 32, 32), dtype=np.float32)
+    
     model = CustomActorCriticCnnPolicy(
         observation_space=observation_space, 
         action_space=action_space, 

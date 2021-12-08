@@ -4,7 +4,6 @@ from pathlib import Path
 import pickle
 import os
 import shutil
-import copy 
 import wandb
 import random
 import logging
@@ -20,21 +19,9 @@ import torch.optim as optim
 from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import sys
-from agent_policy import CustomActorCriticCnnPolicy, CustomFeatureExtractor
-from imitation.algorithms.bc import BC, ConstantLRSchedule
-from typing import Callable, Dict, List, Optional, Tuple, Type, Union
 
-class RLPolicy(torch.nn.Module):
-    def __init__(self, feature_extractor, mlp_extractor, value_net):
-        super(RLPolicy, self).__init__()
-        self.feature_extractor = feature_extractor
-        self.mlp_extractor = mlp_extractor
-        self.value_net = value_net
-
-    def forward(self, observation):
-        features = self.feature_extractor(observation)
-        value_latent = self.mlp_extractor.forward_critic(features)
-        return features[0], self.value_net(value_latent)
+# sys.path.append("../../LuxPythonEnvGym/")
+# from luxai2021.game.city import City, CityTile
 
 def get_logger(level=INFO, out_file=None):
     logger = logging.getLogger()
@@ -66,6 +53,7 @@ def seed_everything(seed: int = 42):
     torch.backends.cudnn.deterministic = True  # type: ignore
     torch.backends.cudnn.benchmark = False  # type: ignore
 
+
 def extract_unit_actions(actions):
     actioned_unit_ids = []
     unit_actions = []
@@ -76,6 +64,7 @@ def extract_unit_actions(actions):
             unit_actions.append(action)
             actioned_unit_ids.append(unit_id)
     return unit_actions, actioned_unit_ids
+
 
 def extract_center_actions(obs, actioned_unit_ids):
     center_actions = []
@@ -90,6 +79,7 @@ def extract_center_actions(obs, actioned_unit_ids):
                 center_actions.append(f'm {unit_id} c')
     return center_actions
 
+
 def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', only_win=False): 
     logger.info(f"Team: {team_name}")
     labels = []
@@ -100,23 +90,21 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
     lb_scores = []
     os.makedirs(data_dir, exist_ok=True)
     episodes = [path for path in Path(episode_dir).glob('*.json') if 'output' not in path.name]
-    # episodes = episodes[:50]
+    # episodes = episodes[:500]
     for filepath in tqdm(episodes): 
         with open(filepath) as f:
             json_load = json.load(f)
-
+#         if json_load['other']['SubmissionId'] not in target_sub_id_list:
+#             continue
         sub_id = json_load['other']['SubmissionId']
         lb_score = json_load['other']['LatestLB']
         ep_id = json_load['info']['EpisodeId']
         win_index = np.argmax([r or 0 for r in json_load['rewards']])  # win or tie
         if only_win:  # 指定したチームが勝ったepisodeのみ取得
-            if json_load['info']['TeamNames'][win_index] != team_name:
+            # if json_load['info']['TeamNames'][win_index] != team_name:
+            if json_load['info']['TeamNames'][win_index] not in team_name:
                 continue
             own_index = win_index
-        else:  # 指定したチームの勝敗関わらずepisodeを取得
-            if team_name not in json_load['info']['TeamNames']: 
-                continue
-            own_index = json_load['info']['TeamNames'].index(team_name)  # 指定チームのindex
 
         for i in range(len(json_load['steps'])-1):
             if json_load['steps'][i][own_index]['status'] == 'ACTIVE':
@@ -138,6 +126,8 @@ def create_dataset_from_json(episode_dir, data_dir, team_name='Toad Brigade', on
                     if k in ['step', 'updates', 'player', 'width', 'height']
                 ])
 
+
+                
                 unit_actions, actioned_unit_ids = extract_unit_actions(actions)
                 center_actions = extract_center_actions(obs, actioned_unit_ids)
                 unit_actions += center_actions
@@ -175,6 +165,7 @@ def depleted_resources(obs):
             return False
     return True
 
+
 def to_label(action):
     strs = action.split(' ')
     unit_id = strs[1]
@@ -187,8 +178,9 @@ def to_label(action):
         label = None
     return label, unit_id 
 
+
 # Input for Neural Network
-def make_input(obs, target_unit_id):
+def make_input(obs, acts, target_unit_id):
     """
     obs(23-4)=19
     
@@ -221,7 +213,6 @@ def make_input(obs, target_unit_id):
     # mapの最大サイズが(32,32)なのでそれに合わせている
     b = np.zeros((17, 32, 32), dtype=np.float32)
     global_b = np.zeros((8, 4, 4), dtype=np.float32)
-    action_mask = np.zeros((6, 32, 32), dtype=np.float32)
     for update in obs['updates']:
         strs = update.split(' ')
         input_identifier = strs[0]
@@ -248,9 +239,6 @@ def make_input(obs, target_unit_id):
             else:
                 opponent_unit_counts += 1
             
-            if target_unit_id == unit_id:
-                action_mask[:,x,y] = 1
-
             # if (obs['player'] == team)&(cooldown == 0):
             own_actionable_units[unit_id] = (x,y)
         
@@ -307,14 +295,23 @@ def make_input(obs, target_unit_id):
 
     # Map Size
     b[16, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
-    return b, global_b, action_mask
+    
+    actions_map = np.zeros((32, 32), dtype=np.float32)  # 4d + bcity
+    actions_mask = np.zeros((32, 32), dtype=np.float32)  # 4d + bcity
+    for a in acts:
+        label, unit_id = to_label(a)
+        if (label is not None)&(unit_id == target_unit_id):
+            (x,y) = own_actionable_units[unit_id]
+            actions_map[x,y] = label
+            actions_mask[x,y] = 1
+    return b, global_b, actions_map, actions_mask
+
 
 class LuxDataset(Dataset):
     def __init__(self, df, data_dir,phase='train'):
         self.obs_ids = df['obs_id'].to_numpy()
         self.unit_ids = df['unit_id'].to_numpy()
-        self.actions = df['label'].to_numpy()
-        self.data_dir = data_dir
+        self.data_dir = data_dir 
         self.phase = phase
         
     def __len__(self):
@@ -325,17 +322,122 @@ class LuxDataset(Dataset):
         with open(self.data_dir + f"{obs_id}.pickle", mode="rb") as f:    
             (obs, acts) = pickle.load(f)
         unit_id = self.unit_ids[idx]
-        north_state, global_feats, action_mask = make_input(obs, unit_id)        
+        north_state, global_feats, actions, actions_mask = make_input(obs, acts, unit_id)
+        
         west_state = np.rot90(north_state,1, axes=(1,2))
         south_state = np.rot90(north_state,2, axes=(1,2))
-        east_state = np.rot90(north_state,3, axes=(1,2))      
+        east_state = np.rot90(north_state,3, axes=(1,2))
+        
         state = np.stack([north_state, west_state, south_state, east_state])
         global_feats = np.stack([global_feats,global_feats, global_feats,global_feats])
-        action = self.actions[idx]
-        return {"obs": state, "global_obs": global_feats, "mask": action_mask, "action": action}
-
+        return state, global_feats, actions, actions_mask
 
 """ Parts of the U-Net model """
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class DoubleConv(nn.Module):
+    """(convolution => [BN] => ReLU) * 2"""
+
+    def __init__(self, in_channels, out_channels, mid_channels=None):
+        super().__init__()
+        if not mid_channels:
+            mid_channels = out_channels
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        return self.double_conv(x)
+
+
+class Down(nn.Module):
+    """Downscaling with maxpool then double conv"""
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.maxpool_conv = nn.Sequential(
+            nn.MaxPool2d(2),
+            DoubleConv(in_channels, out_channels)
+        )
+
+    def forward(self, x):
+        return self.maxpool_conv(x)
+
+
+class Up(nn.Module):
+    """Upscaling then double conv"""
+
+    def __init__(self, in_channels, out_channels, bilinear=True):
+        super().__init__()
+
+        # if bilinear, use the normal convolutions to reduce the number of channels
+        if bilinear:
+            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+            self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
+        else:
+            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+            self.conv = DoubleConv(in_channels, out_channels)
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        # input is CHW
+        diffY = x2.size()[2] - x1.size()[2]
+        diffX = x2.size()[3] - x1.size()[3]
+
+        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
+                        diffY // 2, diffY - diffY // 2])
+        # if you have padding issues, see
+        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
+        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
+        x = torch.cat([x2, x1], dim=1)
+        return self.conv(x)
+
+
+class OutConv(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(OutConv, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+
+    def forward(self, x):
+        return self.conv(x)
+
+class LuxUNet(nn.Module):
+    def __init__(self, n_channels, n_classes, bilinear=True):
+        super(LuxUNet, self).__init__()
+        self.n_channels = n_channels
+        self.n_classes = n_classes
+        self.bilinear = bilinear
+
+        self.inc = DoubleConv(n_channels, 64)
+        self.down1 = Down(64, 128)
+        self.down2 = Down(128, 256)
+        self.down3 = Down(256, 256)  # h,wは変化しなくない？
+        factor = 2 if bilinear else 1
+        self.up1 = Up(256*2+8, 256 // factor, bilinear)
+        self.up2 = Up(256, 128 // factor, bilinear)
+        self.up3 = Up(128, 64, bilinear)
+        self.outc = OutConv(64, n_classes)
+
+    def forward(self, obs, global_feats):
+        x1 = self.inc(obs)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)  # (8,8)
+        x4 = torch.cat([self.down3(x3), global_feats], dim=1)  # (batch,256,4,4) + (batch,4,4,4)
+        x = self.up1(x4, x3)
+        x = self.up2(x, x2)
+        x = self.up3(x, x1)
+        logits = self.outc(x)
+        return logits
+
 def train_model(model, dataloaders_dict, p_criterion,optimizer, scheduler=None, num_epochs=2):
     best_acc = 0.0
     for epoch in range(num_epochs):
@@ -353,31 +455,42 @@ def train_model(model, dataloaders_dict, p_criterion,optimizer, scheduler=None, 
             dataloader = dataloaders_dict[phase]
             for item in tqdm(dataloader, leave=False):        
                 
-                states = item["obs"].cuda().float()
-                global_feats = item["global_obs"].cuda().float()
-                action_mask = item["mask"].cuda().long() 
-                actions = item["action"].cuda().long()
-                batch_size = item["obs"].shape[0]
+                states = item[0].cuda().float()
+                global_feats = item[1].cuda().float()
+                actions = item[2].cuda().long()
+                actions_mask = item[3].cuda().long()
+                
+                batch_size = item[0].shape[0]
                 optimizer.zero_grad()
                 
                 with torch.set_grad_enabled(phase == 'train'):
-                    feats = model.features_extractor({"obs": states, "global_obs": global_feats, "mask":action_mask})  # (batch*4,3)
-                    policy_latent, value_latent = model.mlp_extractor(feats)
-                    policy = model.action_net(policy_latent)  # 学習しない
-                    value = model.value_net(value_latent)
-
-                    policy_loss = p_criterion(policy, actions)
+                    # 4directionを1つにまとめる
+                    batch_states = states.view((-1, 17,32,32))  # (batch*4,23,32,32)
+                    batch_global_feats = global_feats.view((-1,8,4,4))
+                    _policy = model(batch_states, batch_global_feats)  # (batch*4,3)
+                    _policy = _policy.view((batch_size, 4, 3, 32, 32))
+                    _policy[:, 1] = torch.rot90(_policy[:, 1], k=-1, dims=(2,3)) # -90回転
+                    _policy[:, 2] = torch.rot90(_policy[:, 2], k=-2, dims=(2,3)) # -180回転
+                    _policy[:, 3] = torch.rot90(_policy[:, 3], k=-3, dims=(2,3)) # -270回転
+                    center_policy = _policy[:,:, 0].mean(dim=1).view((-1,1,32,32))  # (64,1,32,32)
+                    move_policy = _policy[:,:, 1]  # (64, 4, 32,32)
+                    bcity_policy = _policy[:,:, 2].mean(dim=1).view((-1,1,32,32))  # (64,1,32,32)
+                    policy = torch.cat([center_policy, move_policy, bcity_policy], dim=1)
+    
+                    targets = actions[actions_mask > 0]
+                    predicts = policy[torch.stack([actions_mask]*6, dim=1) > 0].view(-1, 6)
+                    policy_loss = p_criterion(predicts, targets)
                     loss = policy_loss
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
 
-                    preds = torch.max(policy, 1)[1]
-                    epoch_ploss += policy_loss.item() * batch_size
-                    num_correct = (preds.cpu() == actions.data.cpu())
-                    epoch_num_correct += torch.sum(num_correct)
-        
-            epoch_data_size = len(dataloader.dataset)
+
+                    epoch_num_correct += torch.sum(torch.max(predicts, 1)[1] == targets).cpu()
+                    data_size = actions_mask.count_nonzero().cpu()
+                    epoch_data_size += data_size 
+                    epoch_ploss += policy_loss.item() * data_size
+
             epoch_ploss = epoch_ploss / epoch_data_size
             epoch_acc = epoch_num_correct.double() / epoch_data_size
 
@@ -388,21 +501,10 @@ def train_model(model, dataloaders_dict, p_criterion,optimizer, scheduler=None, 
                 wandb.log({'Loss/val': epoch_ploss, 'ACC/val': epoch_acc})
                 logger.info(f'Epoch {epoch + 1}/{num_epochs} | {phase:^5} | Loss(policy): {epoch_ploss:.4f} | Acc: {epoch_acc:.4f}')
         
-        if epoch_acc > best_acc:
-            torch.save(model.cpu().state_dict(), './models/best.pth')
-            dummy_obs = torch.rand(4, 17, 32, 32)
+        if (epoch_acc > best_acc):
+            dummy_obs = torch.rand(4,17, 32, 32)
             dummy_global_obs = torch.rand(4,8,4,4)
-            dummy_mask = torch.rand(6,32,32)  # not use
-
-            rl_model = RLPolicy(
-                model.features_extractor, 
-                model.mlp_extractor, 
-                model.value_net
-            )
-            copy_model = copy.deepcopy(rl_model)  # c
-            torch.onnx.export(copy_model, {"obs": dummy_obs, "global_obs": dummy_global_obs, "mask": dummy_mask}, f"./models/bc_policy.onnx", input_names=["obs", "global_obs", "mask"], opset_version=11)
-            # traced = torch.jit.trace(rl_model.cpu(), {"obs":dummy_obs, "global_obs":dummy_global_obs, "mask": dummy_mask})
-            # traced.save('./models/best_jit.pth')
+            torch.onnx.export(model.cpu(), (dummy_obs, dummy_global_obs), "best.onnx", input_names=["obs", "global_obs"], opset_version=11)
             best_acc = epoch_acc
 
         if scheduler is not None:
@@ -412,11 +514,11 @@ def main():
     seed = 42
     seed_everything(seed)
     team_names = ['Toad Brigade', 'RL is all you need', 'ironbar', 'A.Saito', 'Team Durrett']
-    target_team_name = team_names[0]
+    target_team_name = ['Toad Brigade', 'RL is all you need']
     print("target team:", target_team_name)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
-    run_id = f'UNet_BC_3action_{target_team_name}_v2'
-    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME, id=run_id)  #, mode="disabled") 
+    run_id = f'UNet_IL_{target_team_name}_v1'
+    wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME, id=run_id) 
 
     episode_dir = "../../input/lux_ai_top_team_episodes_1129/"
     data_dir = "./tmp_data/"
@@ -428,56 +530,45 @@ def main():
         'A.Saito':[23760238, 23542431], 
         'Team Durrett': [23608696, 23889524] 
     }
-    target_sub_ids = target_sub_ids_dict[target_team_name]
+    # target_sub_ids = target_sub_ids_dict[target_team_name]
+    target_sub_ids = [23281649, 23297953, 23032370, 23770016, 23770123, 23769678]
     _df = df[df['sub_id'].isin(target_sub_ids)]
     print(_df['label'].value_counts())
 
     # under sampling center action
-    _df['label'].dropna(inplace=True)
     num_sample = int(_df.loc[_df['label'] > 0, 'label'].value_counts().mean())
     center_df = _df[_df['label'] == 0].sample(num_sample)
     other_df = _df[_df['label'] > 0]
     _df = pd.concat([center_df, other_df]).reset_index(drop=True)
     print(_df['label'].value_counts())
+
     logger.info(f"obses:{df['obs_id'].nunique()} samples:{len(df)}")
+    labels = _df['label'].to_numpy()
+    actions = ['center','north', 'west', 'south', 'east', 'bcity']
+    for value, count in zip(*np.unique(labels, return_counts=True)):
+        logger.info(f'{actions[value]:^5}: {count:>3}')
+
     train_df, val_df = train_test_split(_df, test_size=0.1, random_state=seed, stratify=_df['ep_id'])
 
-    batch_size = 64  # 2048
+    batch_size = 256 # 64  # 2048
     train_loader = DataLoader(
         LuxDataset(train_df, data_dir, phase='train'), 
         batch_size=batch_size, 
         shuffle=True, 
-        num_workers=8
+        num_workers=24
     )
     val_loader = DataLoader(
         LuxDataset(val_df, data_dir, phase='val'), 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=8
+        num_workers=24
     )
     dataloaders_dict = {"train": train_loader, "val": val_loader}
     p_criterion = nn.CrossEntropyLoss()
-
-    n_obs_channel = 17
-    n_global_obs_channel = 8
-    action_space = spaces.Discrete(6)
-    observation_space = spaces.Dict(
-            {"obs":spaces.Box(low=0, high=1, shape=(4,n_obs_channel, 32, 32), dtype=np.float32), 
-            "global_obs":spaces.Box(low=0, high=1, shape=(4,n_global_obs_channel, 4, 4), dtype=np.float32),
-            "mask":spaces.Box(low=0, high=1, shape=(6, 32, 32), dtype=np.long),
-            })
-    model = CustomActorCriticCnnPolicy(
-        observation_space=observation_space, 
-        action_space=action_space, 
-        lr_schedule=ConstantLRSchedule(lr=1e-5),
-        net_arch = [dict(pf=[6], vf=[256+n_global_obs_channel])],
-        optimizer_class=torch.optim.AdamW,
-        features_extractor_class=CustomFeatureExtractor,
-        features_extractor_kwargs=dict(features_dim=256+n_global_obs_channel)
-        )
+    model = LuxUNet(n_channels=17, n_classes=3)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
-    train_model(model, dataloaders_dict, p_criterion, optimizer, num_epochs=10)
+    train_model(model, dataloaders_dict, p_criterion, optimizer, num_epochs=15)
     wandb.finish()
 
 if __name__ == '__main__':

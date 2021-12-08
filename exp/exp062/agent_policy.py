@@ -1,7 +1,7 @@
 import sys
 import time
 from functools import partial  # pip install functools
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union, Callable
 import numpy as np
 from gym import spaces
 sys.path.append("../../LuxPythonEnvGym/")
@@ -14,8 +14,7 @@ import torch.nn.functional as F
 import gym 
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.policies import ActorCriticCnnPolicy
-from typing import Callable, Dict, List, Optional, Tuple, Type, Union
-
+import onnxruntime as ort 
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
@@ -103,7 +102,6 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
     def forward(self, input):
         obses = input["obs"].view(-1, 17, 32,32)
         global_obses = input["global_obs"].view(-1, 8, 4, 4)
-
         batch_size = torch.div(obses.shape[0], 4, rounding_mode='trunc').item()
         x1 = self.inc(obses)
         x2 = self.down1(x1)
@@ -208,9 +206,15 @@ class CustomActorCriticCnnPolicy(ActorCriticCnnPolicy):
     def _build_mlp_extractor(self) -> None:
         self.mlp_extractor = CustomMlpExtractor(self.features_dim)
 
-class ImitationAgent(Agent):
-    def __init__(self, model=None) -> None:
-        super().__init__()
+class AgentPolicy(AgentWithModel):
+    def __init__(self, mode="train", model=None) -> None:
+        """
+        Arguments:
+            mode: "train" or "inference", which controls if this agent is for training or not.
+            model: The pretrained model, or if None it will operate in training mode.
+        """
+        super().__init__(mode, model)
+
         self.actions_units = [
             partial(MoveAction, direction=Constants.DIRECTIONS.CENTER),  # This is the do-nothing action
             partial(MoveAction, direction=Constants.DIRECTIONS.NORTH),
@@ -221,26 +225,39 @@ class ImitationAgent(Agent):
         ]
         self.action_space = spaces.Discrete(len(self.actions_units))
         self.observation_space = spaces.Dict(
-            {"obs":spaces.Box(low=0, high=1, shape=(4, 17, 32, 32), dtype=np.float32), 
-            "global_obs":spaces.Box(low=0, high=1, shape=(4, 8, 4, 4), dtype=np.float32),
-            "mask":spaces.Box(low=0, high=1, shape=(len(self.actions_units), 32, 32), dtype=np.long),
-            })
+                {"obs":spaces.Box(low=0, high=1, shape=(4, 17, 32, 32), dtype=np.float32), 
+                "global_obs":spaces.Box(low=0, high=1, shape=(4, 8, 4, 4), dtype=np.float32),
+                "mask":spaces.Box(low=0, high=1, shape=(len(self.actions_units), 32, 32), dtype=np.long),
+                })
         self.model = model
-
-    def torch_predict(self, obs):
-        with torch.no_grad():
-            _policy, value = self.model({
-              "obs": torch.from_numpy(obs["obs"]), 
-              "global_obs": torch.from_numpy(obs["global_obs"]),
-              "mask": torch.from_numpy(np.expand_dims(obs["mask"], axis=0))
-              })
-        policy = _policy[0].detach().numpy()  # (6, 32, 32)
-        return policy
+    # def torch_predict(self, obs):
+    #     with torch.no_grad():
+    #         _policy, value = self.model({
+    #           "obs": torch.from_numpy(obs["obs"]), 
+    #           "global_obs": torch.from_numpy(obs["global_obs"]),
+    #           "mask": torch.from_numpy(np.expand_dims(obs["mask"], axis=0))
+    #           })
+    #     policy = _policy[0].detach().numpy()  # (6, 32, 32)
+    #     return policy
 
     def onnx_predict(self, input):
         policy, value  = self.model.run(None, {"obs": input["obs"], "global_obs": input["global_obs"]})
         return policy[0], value[0]
-    
+
+    def set_model(self, model_path):
+        # self.model = torch.jit.load(model_path)
+        self.model = ort.InferenceSession(model_path)
+        print(f"[Self-Play Agent] set model by {model_path}")
+
+    def get_agent_type(self):
+        """
+        Returns the type of agent. Use AGENT for inference, and LEARNING for training a model.
+        """
+        if self.mode == "train":
+            return Constants.AGENT_TYPE.LEARNING
+        else:
+            return Constants.AGENT_TYPE.AGENT
+
     def action_code_to_action(self, action_code, game, unit=None, city_tile=None, team=None):
         """
         Takes an action in the environment according to actionCode:
@@ -275,7 +292,31 @@ class ImitationAgent(Agent):
             # Not a valid action
             print(e)
             return None
-        
+
+    def take_action(self, action_code, game, unit=None, city_tile=None, team=None):
+        """
+        Takes an action in the environment according to actionCode:
+            actionCode: Index of action to take into the action array.
+        """
+        action = self.action_code_to_action(action_code, game, unit, city_tile, team)
+        self.match_controller.take_action(action)
+
+    def game_start(self, game):
+        """
+        This function is called at the start of each game. Use this to
+        reset and initialize per game. Note that self.team may have
+        been changed since last game. The game map has been created
+        and starting units placed.
+
+        Args:
+            game ([type]): Game.
+        """
+        self.units_last = 0
+        self.city_tiles_last = 0
+        self.fuel_collected_last = 0
+        self.research_points_last = 0
+        self.rewards = {}
+
     def process_city_turn(self, game, team):
         actions = []
         unit_count = len(game.get_teams_units(team))
@@ -343,7 +384,7 @@ class ImitationAgent(Agent):
             print("[RL Agent]WARNING: Inference took %.3f seconds for computing actions. Limit is 3 second." % time_taken,
                   file=sys.stderr)
         return actions
-        
+
     def get_observation(self, game, unit=None, city_tile=None, team=None):
         """
         Implements getting a observation from the current game for this unit or city
@@ -400,6 +441,11 @@ class ImitationAgent(Agent):
                 else:
                     b[9:12, x, y] = (1, fuel_ratio, cooldown)
                     opponent_citytile_count += 1
+                
+                # dummy mask
+                if city_tile is not None:
+                    if city_tile.pos == cell.pos:
+                        action_mask[:,x,y] = 1
 
         # resource
         resource_dict = {'wood': 12, 'coal': 13, 'uranium': 14}
@@ -442,4 +488,52 @@ class ImitationAgent(Agent):
         east_obs = np.rot90(north_obs, 3, axes=(1,2)).copy()
         obses = np.stack([north_obs, west_obs, south_obs, east_obs])
         global_obses = np.stack([global_b]*4)
+
+        # assert np.sum(action_mask) > 0, f'target:{unit.id}, own:{game.state["teamStates"][team]["units"].keys()} opponent: {game.state["teamStates"][opponent_team]["units"].keys()}'
         return {"obs":obses, "global_obs": global_obses, "mask": action_mask}
+
+    def get_reward(self, game, is_game_finished, is_new_turn, is_game_error):
+        """
+        Returns the reward function for this step of the game. Reward should be a
+        delta increment to the reward, not the total current reward.
+        """
+        self.rewards = {
+            "rew/r_game_win": 0
+            }
+            
+        turn = game.state["turn"]
+        turn_decay = (360-turn)/360
+
+        if is_game_error:
+            # Game environment step failed, assign a game lost reward to not incentivise this
+            print("Game failed due to error")
+            return -1.0
+
+        if not is_new_turn and not is_game_finished:
+            # Only apply rewards at the start of each turn or at game end
+            return 0
+
+        # Give a reward of 1.0 per city tile alive at the end of the game
+        if is_game_finished:
+            if game.get_winning_team() == self.team:
+                self.rewards["rew/r_game_win"] += 1 # Win
+            else:
+                self.rewards["rew/r_game_win"] -= 1 # Loss
+
+        reward = 0
+        for name, value in self.rewards.items():
+            reward += value
+
+        return reward
+
+    def turn_heurstics(self, game, is_first_turn):
+        """
+        This is called pre-observation actions to allow for hardcoded heuristics
+        to control a subset of units. Any unit or city that gets an action from this
+        callback, will not create an observation+action.
+        Args:
+            game ([type]): Game in progress
+            is_first_turn (bool): True if it's the first turn of a game.
+        """
+        actions = self.process_city_turn(game, self.team)
+        self.match_controller.take_actions(actions)

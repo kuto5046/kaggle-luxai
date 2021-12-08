@@ -1,0 +1,221 @@
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+
+Critical error handling unit turn.
+KeyError('c_19')
+Traceback (most recent call last):
+  File "/work/exp/exp060/luxai2021/game/game.py", line 583, in run_turn_with_actions
+    unit.handle_turn(self)
+  File "/work/exp/exp060/luxai2021/game/actionable.py", line 53, in handle_turn
+    self.turn(game)
+  File "/work/exp/exp060/luxai2021/game/unit.py", line 186, in turn
+    game.spawn_city_tile(action.team, self.pos.x, self.pos.y)
+  File "/work/exp/exp060/luxai2021/game/game.py", line 936, in spawn_city_tile
+    city = self.cities[city_id]
+KeyError: 'c_19'
+

@@ -23,18 +23,23 @@ import sys
 from agent_policy import CustomActorCriticCnnPolicy, CustomFeatureExtractor
 from imitation.algorithms.bc import BC, ConstantLRSchedule
 from typing import Callable, Dict, List, Optional, Tuple, Type, Union
+sys.path.append("../../LuxPythonEnvGym/")
+from luxai2021.game.constants import LuxMatchConfigs_Default, LuxMatchConfigs_Replay
+from luxai2021.game.game import Game
+from agent_policy import ImitationAgent
 
 class RLPolicy(torch.nn.Module):
-    def __init__(self, feature_extractor, mlp_extractor, value_net):
+    def __init__(self, feature_extractor, mlp_extractor, action_net, value_net):
         super(RLPolicy, self).__init__()
         self.feature_extractor = feature_extractor
         self.mlp_extractor = mlp_extractor
+        self.action_net = action_net
         self.value_net = value_net
 
     def forward(self, observation):
         features = self.feature_extractor(observation)
-        value_latent = self.mlp_extractor.forward_critic(features)
-        return features[0], self.value_net(value_latent)
+        policy_latent, value_latent = self.mlp_extractor(features)
+        return self.action_net(policy_latent), self.value_net(value_latent)
 
 def get_logger(level=INFO, out_file=None):
     logger = logging.getLogger()
@@ -187,127 +192,6 @@ def to_label(action):
         label = None
     return label, unit_id 
 
-# Input for Neural Network
-def make_input(obs, target_unit_id):
-    """
-    obs(23-4)=19
-    
-    global features(10)
-    own research point
-    opponent research point
-    cycle
-    turn
-    own unit count
-    opponent unit count
-    own city count
-    opponent city count
-    # own fuel
-    # opponent fuel
-    """
-    own_actionable_units = {}
-    width, height = obs['width'], obs['height']
-
-    # mapのサイズを調整するためにshiftするマス数
-    # width=20の場合は6 width=21の場合5
-    x_shift = (32 - width) // 2
-    y_shift = (32 - height) // 2
-    cities = {}
-    
-    # (c, w, h)
-    own_unit_counts = 0
-    opponent_unit_counts = 0
-    own_citytile_counts = 0
-    opponent_citytile_counts = 0
-    # mapの最大サイズが(32,32)なのでそれに合わせている
-    b = np.zeros((17, 32, 32), dtype=np.float32)
-    global_b = np.zeros((8, 4, 4), dtype=np.float32)
-    action_mask = np.zeros((6, 32, 32), dtype=np.float32)
-    for update in obs['updates']:
-        strs = update.split(' ')
-        input_identifier = strs[0]
-
-        if input_identifier == 'u':
-            x = int(strs[4]) + x_shift
-            y = int(strs[5]) + y_shift
-            unit_id = strs[3]
-            wood = int(strs[7])
-            coal = int(strs[8])
-            uranium = int(strs[9])
-            
-            # Units
-            team = int(strs[2])
-            cooldown = float(strs[6])
-            idx = 0 + (team - obs['player']) % 2 * 3
-            b[idx:idx + 3, x, y] += (
-                1,
-                cooldown / 6,
-                (wood + coal + uranium) / 2000
-            )
-            if team == obs['player']:
-                own_unit_counts += 1
-            else:
-                opponent_unit_counts += 1
-            
-            if target_unit_id == unit_id:
-                action_mask[:,x,y] = 1
-
-            # if (obs['player'] == team)&(cooldown == 0):
-            own_actionable_units[unit_id] = (x,y)
-        
-        elif input_identifier == 'ct':
-            # CityTiles
-            team = int(strs[1])
-            city_id = strs[2]
-            x = int(strs[3]) + x_shift
-            y = int(strs[4]) + y_shift
-            cooldown = int(strs[5])
-            idx = 6 + (team - obs['player']) % 2 * 3
-            b[idx:idx + 3, x, y] = (
-                1,
-                cities[city_id],
-                cooldown / 10
-            )
-            if team == obs['player']:
-                own_citytile_counts += 1
-            else:
-                opponent_citytile_counts += 1
-            
-        elif input_identifier == 'r':
-            # Resources
-            r_type = strs[1]
-            x = int(strs[2]) + x_shift
-            y = int(strs[3]) + y_shift
-            amt = int(float(strs[4]))
-            b[{'wood': 12, 'coal': 13, 'uranium': 14}[r_type], x, y] = amt / 800
-        elif input_identifier == 'rp':
-            # Research Points
-            team = int(strs[1])
-            rp = int(strs[2])
-            global_b[0 + (team - obs['player']) % 2, :] = min(rp, 200) / 200
-        elif input_identifier == 'c':
-            # Cities
-            city_id = strs[2]
-            fuel = float(strs[3])
-            lightupkeep = float(strs[4])
-            cities[city_id] = min(fuel / lightupkeep, 10) / 10
-        elif input_identifier == "ccd":
-            x = int(strs[1]) + x_shift
-            y = int(strs[2]) + y_shift
-            road_level = float(strs[3])
-            b[15, x, y] =  road_level / 6
-    
-    # Day/Night Cycle
-    global_b[2, :] = obs['step'] % 40 / 40
-    # Turns
-    global_b[3, :] = obs['step'] / 360
-    global_b[4, :] = own_unit_counts / 100
-    global_b[5, :] = opponent_unit_counts / 100
-    global_b[6, :] = own_citytile_counts / 100
-    global_b[7, :] = opponent_citytile_counts / 100
-
-    # Map Size
-    b[16, x_shift:32 - x_shift, y_shift:32 - y_shift] = 1
-    return b, global_b, action_mask
 
 class LuxDataset(Dataset):
     def __init__(self, df, data_dir,phase='train'):
@@ -316,6 +200,7 @@ class LuxDataset(Dataset):
         self.actions = df['label'].to_numpy()
         self.data_dir = data_dir
         self.phase = phase
+        self.agent = ImitationAgent()
         
     def __len__(self):
         return len(self.obs_ids)
@@ -325,14 +210,19 @@ class LuxDataset(Dataset):
         with open(self.data_dir + f"{obs_id}.pickle", mode="rb") as f:    
             (obs, acts) = pickle.load(f)
         unit_id = self.unit_ids[idx]
-        north_state, global_feats, action_mask = make_input(obs, unit_id)        
-        west_state = np.rot90(north_state,1, axes=(1,2))
-        south_state = np.rot90(north_state,2, axes=(1,2))
-        east_state = np.rot90(north_state,3, axes=(1,2))      
-        state = np.stack([north_state, west_state, south_state, east_state])
-        global_feats = np.stack([global_feats,global_feats, global_feats,global_feats])
         action = self.actions[idx]
-        return {"obs": state, "global_obs": global_feats, "mask": action_mask, "action": action}
+
+        configs = LuxMatchConfigs_Replay
+        configs["width"] = obs["width"]
+        configs["height"] = obs["height"]
+        game = Game(configs)
+        game.reset(obs["updates"])
+        game.state["turn"] = obs["step"]
+        team = obs["player"]
+        unit = game.get_unit(team, unit_id)
+        base_obs = self.agent.get_base_observation(game, team)
+        obs = self.agent.get_observation(game, unit, base_obs)
+        return {"obs": obs, "action": action}
 
 
 """ Parts of the U-Net model """
@@ -353,17 +243,15 @@ def train_model(model, dataloaders_dict, p_criterion,optimizer, scheduler=None, 
             dataloader = dataloaders_dict[phase]
             for item in tqdm(dataloader, leave=False):        
                 
-                states = item["obs"].cuda().float()
-                global_feats = item["global_obs"].cuda().float()
-                action_mask = item["mask"].cuda().long() 
+                obses = item["obs"].cuda().float()
                 actions = item["action"].cuda().long()
                 batch_size = item["obs"].shape[0]
                 optimizer.zero_grad()
                 
                 with torch.set_grad_enabled(phase == 'train'):
-                    feats = model.features_extractor({"obs": states, "global_obs": global_feats, "mask":action_mask})  # (batch*4,3)
+                    feats = model.features_extractor(obses)  # (batch*4,3)
                     policy_latent, value_latent = model.mlp_extractor(feats)
-                    policy = model.action_net(policy_latent)  # 学習しない
+                    policy = model.action_net(policy_latent)
                     value = model.value_net(value_latent)
 
                     policy_loss = p_criterion(policy, actions)
@@ -390,19 +278,16 @@ def train_model(model, dataloaders_dict, p_criterion,optimizer, scheduler=None, 
         
         if epoch_acc > best_acc:
             torch.save(model.cpu().state_dict(), './models/best.pth')
-            dummy_obs = torch.rand(4, 17, 32, 32)
-            dummy_global_obs = torch.rand(4,8,4,4)
-            dummy_mask = torch.rand(6,32,32)  # not use
+            dummy_obs = torch.rand(1, 26, 32, 32)
 
             rl_model = RLPolicy(
                 model.features_extractor, 
-                model.mlp_extractor, 
+                model.mlp_extractor,
+                model.action_net,
                 model.value_net
             )
             copy_model = copy.deepcopy(rl_model)  # c
-            torch.onnx.export(copy_model, {"obs": dummy_obs, "global_obs": dummy_global_obs, "mask": dummy_mask}, f"./models/bc_policy.onnx", input_names=["obs", "global_obs", "mask"], opset_version=11)
-            # traced = torch.jit.trace(rl_model.cpu(), {"obs":dummy_obs, "global_obs":dummy_global_obs, "mask": dummy_mask})
-            # traced.save('./models/best_jit.pth')
+            torch.onnx.export(copy_model.cpu(), dummy_obs, f"./models/simple_policy.onnx", opset_version=11)
             best_acc = epoch_acc
 
         if scheduler is not None:
@@ -415,7 +300,7 @@ def main():
     target_team_name = team_names[0]
     print("target team:", target_team_name)
     EXP_NAME = str(Path().resolve()).split('/')[-1]
-    run_id = f'UNet_BC_3action_{target_team_name}_v2'
+    run_id = f'simple_model_{target_team_name}_v2'
     wandb.init(project='lux-ai', entity='kuto5046', group=EXP_NAME, id=run_id)  #, mode="disabled") 
 
     episode_dir = "../../input/lux_ai_top_team_episodes_1129/"
@@ -433,7 +318,6 @@ def main():
     print(_df['label'].value_counts())
 
     # under sampling center action
-    _df['label'].dropna(inplace=True)
     num_sample = int(_df.loc[_df['label'] > 0, 'label'].value_counts().mean())
     center_df = _df[_df['label'] == 0].sample(num_sample)
     other_df = _df[_df['label'] > 0]
@@ -458,22 +342,18 @@ def main():
     dataloaders_dict = {"train": train_loader, "val": val_loader}
     p_criterion = nn.CrossEntropyLoss()
 
-    n_obs_channel = 17
-    n_global_obs_channel = 8
+    n_obs_channel = 26
     action_space = spaces.Discrete(6)
-    observation_space = spaces.Dict(
-            {"obs":spaces.Box(low=0, high=1, shape=(4,n_obs_channel, 32, 32), dtype=np.float32), 
-            "global_obs":spaces.Box(low=0, high=1, shape=(4,n_global_obs_channel, 4, 4), dtype=np.float32),
-            "mask":spaces.Box(low=0, high=1, shape=(6, 32, 32), dtype=np.long),
-            })
+    observation_space = spaces.Box(low=0, high=1, shape=(n_obs_channel, 32, 32), dtype=np.float32)
+
     model = CustomActorCriticCnnPolicy(
         observation_space=observation_space, 
         action_space=action_space, 
         lr_schedule=ConstantLRSchedule(lr=1e-5),
-        net_arch = [dict(pf=[6], vf=[256+n_global_obs_channel])],
+        net_arch = [],
         optimizer_class=torch.optim.AdamW,
         features_extractor_class=CustomFeatureExtractor,
-        features_extractor_kwargs=dict(features_dim=256+n_global_obs_channel)
+        features_extractor_kwargs=dict(features_dim=128)
         )
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 

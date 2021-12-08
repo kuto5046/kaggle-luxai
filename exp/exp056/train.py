@@ -433,7 +433,6 @@ def main():
     print(_df['label'].value_counts())
 
     # under sampling center action
-    _df['label'].dropna(inplace=True)
     num_sample = int(_df.loc[_df['label'] > 0, 'label'].value_counts().mean())
     center_df = _df[_df['label'] == 0].sample(num_sample)
     other_df = _df[_df['label'] > 0]

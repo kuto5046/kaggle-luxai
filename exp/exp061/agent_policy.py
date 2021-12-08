@@ -208,6 +208,7 @@ class CustomActorCriticCnnPolicy(ActorCriticCnnPolicy):
     def _build_mlp_extractor(self) -> None:
         self.mlp_extractor = CustomMlpExtractor(self.features_dim)
 
+
 class ImitationAgent(Agent):
     def __init__(self, model=None) -> None:
         super().__init__()

@@ -1,7 +1,7 @@
 import sys
 import time
 from functools import partial  # pip install functools
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union, Callable
 import numpy as np
 from gym import spaces
 sys.path.append("../../LuxPythonEnvGym/")
@@ -14,8 +14,7 @@ import torch.nn.functional as F
 import gym 
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.policies import ActorCriticCnnPolicy
-from typing import Callable, Dict, List, Optional, Tuple, Type, Union
-
+import onnxruntime as ort 
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
@@ -100,10 +99,17 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
         self.up3 = Up(128, 64, bilinear)
         self.outc = OutConv(64, 3)
 
+        self.linear = nn.Sequential(
+            nn.Linear((256+n_global_obs_channel)*4, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
+            nn.Tanh()
+        )
+
     def forward(self, input):
         obses = input["obs"].view(-1, 17, 32,32)
         global_obses = input["global_obs"].view(-1, 8, 4, 4)
-
         batch_size = torch.div(obses.shape[0], 4, rounding_mode='trunc').item()
         x1 = self.inc(obses)
         x2 = self.down1(x1)
@@ -114,19 +120,17 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
         x = self.up3(x, x1)
         _policy = self.outc(x)
         _policy = _policy.view((batch_size, 4, 3, 32, 32))
+
         # inplace rot90 to transpose and flip because onnx can't support torch.rot90
-        # _policy[:, 1] = torch.rot90(_policy[:, 1], k=-1, dims=(2,3)) # -90回転
-        # _policy[:, 2] = torch.rot90(_policy[:, 2], k=-2, dims=(2,3)) # -180回転
-        # _policy[:, 3] = torch.rot90(_policy[:, 3], k=-3, dims=(2,3)) # -270回転
         _policy[:, 1] = _policy[:, 1].flip(dims=(2,)).transpose(2,3)  # -90回転
         _policy[:, 2] = _policy[:, 2].flip(dims=(2,3))  # -180回転
         _policy[:, 3] = _policy[:, 3].transpose(2,3).flip(dims=(2,))  # -270回転
-
         center_policy = _policy[:,:, 0].mean(dim=1).view((-1,1,32,32))  # (64,1,32,32)
         move_policy = _policy[:,:, 1]  # (64, 4, 32,32)
         bcity_policy = _policy[:,:, 2].mean(dim=1).view((-1,1,32,32))  # (64,1,32,32)
         policy_logits = torch.cat([center_policy, move_policy, bcity_policy], dim=1)
-        value_logits = x4.view(x4.shape[0], x4.shape[1], -1).mean(-1).view(batch_size, 4, -1).mean(1)
+
+        value_logits = self.linear(x4.view(x4.shape[0], x4.shape[1], -1).mean(-1).view(batch_size, -1))
         return (policy_logits, value_logits, input["mask"])
 
 class CustomMlpExtractor(nn.Module):
@@ -142,26 +146,13 @@ class CustomMlpExtractor(nn.Module):
     def __init__(
         self,
         features_dim: int,
-        last_layer_dim_pi: int = 6,
+        last_layer_dim_pi: int = 64,
         last_layer_dim_vf: int = 64,
     ):
         super(CustomMlpExtractor, self).__init__()
 
-        # IMPORTANT:
-        # Save output dimensions, used to create the distributions
         self.latent_dim_pi = last_layer_dim_pi
         self.latent_dim_vf = last_layer_dim_vf
-
-        # Policy network(3次元を1次元にする)
-        # self.policy_net = nn.Sequential(
-
-        # )
-        # Value network
-        self.value_net = nn.Sequential(
-            nn.Linear(features_dim, last_layer_dim_vf),
-            nn.BatchNorm1d(last_layer_dim_vf),
-            nn.ReLU(),
-        )
 
     def forward(self, features):
         """
@@ -169,14 +160,15 @@ class CustomMlpExtractor(nn.Module):
             If all layers are shared, then ``latent_policy == latent_value``
         """
         batch_size = features[0].shape[0]
-        return features[0][features[2] > 0].view(batch_size, 6), self.value_net(features[1])
+        return features[0][features[2] > 0].view(batch_size, 6), features[1]
 
     def forward_actor(self, features):
         batch_size = features[0].shape[0]
         return features[0][features[2] > 0].view(batch_size, 6)
 
     def forward_critic(self, features):
-        return self.value_net(features[1])
+        return features[1]
+
 
 class CustomActorCriticCnnPolicy(ActorCriticCnnPolicy):
     def __init__(
@@ -205,12 +197,19 @@ class CustomActorCriticCnnPolicy(ActorCriticCnnPolicy):
         
         # don't anything in action net
         self.action_net = nn.Sequential()
+        self.value_net = nn.Sequential()
     def _build_mlp_extractor(self) -> None:
         self.mlp_extractor = CustomMlpExtractor(self.features_dim)
 
-class ImitationAgent(Agent):
-    def __init__(self, model=None) -> None:
-        super().__init__()
+class AgentPolicy(AgentWithModel):
+    def __init__(self, mode="train", model=None) -> None:
+        """
+        Arguments:
+            mode: "train" or "inference", which controls if this agent is for training or not.
+            model: The pretrained model, or if None it will operate in training mode.
+        """
+        super().__init__(mode, model)
+
         self.actions_units = [
             partial(MoveAction, direction=Constants.DIRECTIONS.CENTER),  # This is the do-nothing action
             partial(MoveAction, direction=Constants.DIRECTIONS.NORTH),
@@ -221,26 +220,40 @@ class ImitationAgent(Agent):
         ]
         self.action_space = spaces.Discrete(len(self.actions_units))
         self.observation_space = spaces.Dict(
-            {"obs":spaces.Box(low=0, high=1, shape=(4, 17, 32, 32), dtype=np.float32), 
-            "global_obs":spaces.Box(low=0, high=1, shape=(4, 8, 4, 4), dtype=np.float32),
-            "mask":spaces.Box(low=0, high=1, shape=(len(self.actions_units), 32, 32), dtype=np.long),
-            })
+                {"obs":spaces.Box(low=0, high=1, shape=(4, 17, 32, 32), dtype=np.float32), 
+                "global_obs":spaces.Box(low=0, high=1, shape=(4, 8, 4, 4), dtype=np.float32),
+                "mask":spaces.Box(low=0, high=1, shape=(len(self.actions_units), 32, 32), dtype=np.long),
+                })
         self.model = model
 
-    def torch_predict(self, obs):
-        with torch.no_grad():
-            _policy, value = self.model({
-              "obs": torch.from_numpy(obs["obs"]), 
-              "global_obs": torch.from_numpy(obs["global_obs"]),
-              "mask": torch.from_numpy(np.expand_dims(obs["mask"], axis=0))
-              })
-        policy = _policy[0].detach().numpy()  # (6, 32, 32)
-        return policy
+    # def torch_predict(self, obs):
+    #     with torch.no_grad():
+    #         _policy, value = self.model({
+    #           "obs": torch.from_numpy(obs["obs"]), 
+    #           "global_obs": torch.from_numpy(obs["global_obs"]),
+    #           "mask": torch.from_numpy(np.expand_dims(obs["mask"], axis=0))
+    #           })
+    #     policy = _policy[0].detach().numpy()  # (6, 32, 32)
+    #     return policy
 
     def onnx_predict(self, input):
         policy, value  = self.model.run(None, {"obs": input["obs"], "global_obs": input["global_obs"]})
         return policy[0], value[0]
-    
+
+    def set_model(self, model_path):
+        # self.model = torch.jit.load(model_path)
+        self.model = ort.InferenceSession(model_path)
+        print(f"[Self-Play Agent] set model by {model_path}")
+
+    def get_agent_type(self):
+        """
+        Returns the type of agent. Use AGENT for inference, and LEARNING for training a model.
+        """
+        if self.mode == "train":
+            return Constants.AGENT_TYPE.LEARNING
+        else:
+            return Constants.AGENT_TYPE.AGENT
+
     def action_code_to_action(self, action_code, game, unit=None, city_tile=None, team=None):
         """
         Takes an action in the environment according to actionCode:
@@ -275,7 +288,31 @@ class ImitationAgent(Agent):
             # Not a valid action
             print(e)
             return None
-        
+
+    def take_action(self, action_code, game, unit=None, city_tile=None, team=None):
+        """
+        Takes an action in the environment according to actionCode:
+            actionCode: Index of action to take into the action array.
+        """
+        action = self.action_code_to_action(action_code, game, unit, city_tile, team)
+        self.match_controller.take_action(action)
+
+    def game_start(self, game):
+        """
+        This function is called at the start of each game. Use this to
+        reset and initialize per game. Note that self.team may have
+        been changed since last game. The game map has been created
+        and starting units placed.
+
+        Args:
+            game ([type]): Game.
+        """
+        self.units_last = 0
+        self.city_tiles_last = 0
+        self.fuel_collected_last = 0
+        self.research_points_last = 0
+        self.rewards = {}
+
     def process_city_turn(self, game, team):
         actions = []
         unit_count = len(game.get_teams_units(team))
@@ -343,7 +380,7 @@ class ImitationAgent(Agent):
             print("[RL Agent]WARNING: Inference took %.3f seconds for computing actions. Limit is 3 second." % time_taken,
                   file=sys.stderr)
         return actions
-        
+
     def get_observation(self, game, unit=None, city_tile=None, team=None):
         """
         Implements getting a observation from the current game for this unit or city
@@ -442,4 +479,105 @@ class ImitationAgent(Agent):
         east_obs = np.rot90(north_obs, 3, axes=(1,2)).copy()
         obses = np.stack([north_obs, west_obs, south_obs, east_obs])
         global_obses = np.stack([global_b]*4)
+        # assert np.sum(action_mask) > 0, f'target:{unit.id}, own:{game.state["teamStates"][team]["units"].keys()} opponent: {game.state["teamStates"][opponent_team]["units"].keys()}'
         return {"obs":obses, "global_obs": global_obses, "mask": action_mask}
+
+    def get_reward(self, game, is_game_finished, is_new_turn, is_game_error):
+        """
+        Returns the reward function for this step of the game. Reward should be a
+        delta increment to the reward, not the total current reward.
+        """
+        self.rewards = {
+            # "rew/r_city_tiles": 0,
+            # "rew/r_research_points_coal_flag": 0,
+            # "rew/r_research_points_uranium_flag": 0,
+            # "rew/r_fuel_collected": 0,
+            # "rew/r_city_tiles_end": 0,
+            "rew/r_game_win": 0
+            }
+            
+        turn = game.state["turn"]
+        turn_decay = (360-turn)/360
+
+        if is_game_error:
+            # Game environment step failed, assign a game lost reward to not incentivise this
+            print("Game failed due to error")
+            return -1.0
+
+        if not is_new_turn and not is_game_finished:
+            # Only apply rewards at the start of each turn or at game end
+            return 0
+
+        # Get some basic stats
+        # unit_count = len(game.state["teamStates"][self.team]["units"])
+        # city_count = 0
+        # city_count_opponent = 0
+        # city_tile_count = 0
+        # city_tile_count_opponent = 0
+        # for city in game.cities.values():
+        #     if city.team == self.team:
+        #         city_count += 1
+        #     else:
+        #         city_count_opponent += 1
+
+        #     for cell in city.city_cells:
+        #         if city.team == self.team:
+        #             city_tile_count += 1
+        #         else:
+        #             city_tile_count_opponent += 1
+                
+        # Give a reward for unit creation/death. 0.05 reward per unit.
+        # self.rewards["rew/r_units"] = (unit_count - self.units_last) * 0.005
+        # self.units_last = unit_count
+
+        # Give a reward for city creation/death. 0.1 reward per city.
+        # self.rewards["rew/r_city_tiles"] = (city_tile_count - self.city_tiles_last) * 0.1
+
+        # number of citytile after night
+        # if (turn > 0)&(turn % 40 == 0):
+        #     self.rewards["rew/r_city_tiles"] += (city_tile_count - city_tile_count_opponent) * 0.01
+        #     # self.rewards["rew/r_city_tiles"] += (city_tile_count - self.city_tiles_last) * 0.01
+        #     self.city_tiles_last = city_tile_count
+
+        # Reward collecting fuel
+        # fuel_collected = game.stats["teamStats"][self.team]["fuelGenerated"]
+        # self.rewards["rew/r_fuel_collected"] += ( (fuel_collected - self.fuel_collected_last) / 20000 )
+        # self.fuel_collected_last = fuel_collected
+
+        # Reward for Research Points
+        # research_points = game.state["teamStates"][self.team]["researchPoints"]
+        # self.rewards["rew/r_research_points"] = (research_points - self.research_points_last) / 200  # 0.005
+        # if (research_points == 50)&(self.research_points_last < 50):
+        #     self.rewards["rew/r_research_points_coal_flag"] += 0.25 * turn_decay
+        # elif (research_points == 200)&(self.research_points_last < 200):
+        #     self.rewards["rew/r_research_points_uranium_flag"] += 1 * turn_decay
+        # self.research_points_last = research_points
+
+        # Give a reward of 1.0 per city tile alive at the end of the game
+        if is_game_finished:
+            # self.is_last_turn = True
+            # clip = 10
+            # self.rewards["rew/r_city_tiles_end"] += np.clip(city_tile_count - city_tile_count_opponent, -clip, clip)
+            
+            if game.get_winning_team() == self.team:
+                self.rewards["rew/r_game_win"] += 1 # Win
+            else:
+                self.rewards["rew/r_game_win"] -= 1 # Loss
+
+        reward = 0
+        for name, value in self.rewards.items():
+            reward += value
+
+        return reward
+
+    def turn_heurstics(self, game, is_first_turn):
+        """
+        This is called pre-observation actions to allow for hardcoded heuristics
+        to control a subset of units. Any unit or city that gets an action from this
+        callback, will not create an observation+action.
+        Args:
+            game ([type]): Game in progress
+            is_first_turn (bool): True if it's the first turn of a game.
+        """
+        actions = self.process_city_turn(game, self.team)
+        self.match_controller.take_actions(actions)
